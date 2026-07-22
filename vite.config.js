@@ -22,8 +22,8 @@ export default defineConfig({
         name: 'Wander — cc & nana travel wishlist',
         short_name: 'Wander',
         description: 'Save places, auto-enrich, map, and build itineraries together.',
-        theme_color: '#0f766e',
-        background_color: '#0b1120',
+        theme_color: '#f5efe6',
+        background_color: '#f5efe6',
         display: 'standalone',
         orientation: 'portrait',
         start_url: base,
@@ -38,10 +38,10 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.origin.includes('tile.openstreetmap.org'),
+            urlPattern: ({ url }) => url.origin.includes('basemaps.cartocdn.com'),
             handler: 'CacheFirst',
             options: {
-              cacheName: 'osm-tiles',
+              cacheName: 'map-tiles',
               expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 14 },
             },
           },

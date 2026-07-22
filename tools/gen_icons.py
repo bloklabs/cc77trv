@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate Wander PWA icons with no third-party deps (pure-Python PNG writer).
 
-Draws a teal-gradient tile with a white compass rose + red/white needle.
+A soft sakura (cherry blossom) on warm washi paper — calm, muted, gentle.
 Outputs icon-192.png, icon-512.png, maskable-512.png into public/icons/.
 """
 import math
@@ -11,75 +11,80 @@ import zlib
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "public", "icons")
 
-# brand palette
-TEAL = (20, 184, 166)
-TEAL_DARK = (15, 118, 110)
-NAVY = (11, 17, 32)
-RED = (239, 68, 68)
-WHITE = (240, 245, 250)
+# soft washi + sakura palette
+WASHI_HI = (253, 249, 243)
+WASHI_LO = (240, 231, 217)
+PETAL = (236, 194, 204)      # soft sakura pink
+PETAL_EDGE = (224, 170, 184)  # gentle deeper edge
+CENTER = (222, 158, 172)      # blossom heart
+STAMEN = (230, 205, 150)      # soft gold
+INK = (110, 92, 84)
 
 
 def lerp(a, b, t):
     return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def sign(ax, ay, bx, by, cx, cy):
-    return (ax - cx) * (by - cy) - (bx - cx) * (ay - cy)
-
-
-def in_triangle(px, py, a, b, c):
-    d1 = sign(px, py, *a, *b)
-    d2 = sign(px, py, *b, *c)
-    d3 = sign(px, py, *c, *a)
-    has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-    has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
-    return not (has_neg and has_pos)
-
-
 def draw(size, maskable=False):
-    cx = cy = size / 2
-    R = size * 0.5
-    corner = 0 if maskable else size * 0.22  # rounded corners for standard icon
-    inset = size * 0.16 if maskable else 0     # maskable safe zone padding
-    ring_r = (R - inset) * 0.62
-    needle = (R - inset) * 0.52
-    half_w = (R - inset) * 0.12
+    cx = cy = (size - 1) / 2
+    R = size / 2
+    corner = 0 if maskable else size * 0.22
+    inset = size * 0.14 if maskable else 0
+    rad = R - inset
 
-    n_apex = (cx, cy - needle)
-    s_apex = (cx, cy + needle)
-    l = (cx - half_w, cy)
-    r = (cx + half_w, cy)
+    pd = rad * 0.30    # petal-center distance
+    pa = rad * 0.36    # petal length (radial)
+    pb = rad * 0.21    # petal width (tangential)
+    rc = rad * 0.13    # blossom heart radius
+    angles = [math.radians(-90 + 72 * k) for k in range(5)]  # 5 petals, first points up
+
+    petals = []
+    notches = []
+    for a in angles:
+        ux, uy = math.cos(a), math.sin(a)
+        petals.append((cx + ux * pd, cy + uy * pd, math.cos(a), math.sin(a)))
+        notches.append((cx + ux * (pd + pa * 0.80), cy + uy * (pd + pa * 0.80), pb * 0.60))
+    stamens = []
+    for a in angles:
+        aa = a + math.radians(36)
+        stamens.append((cx + math.cos(aa) * rc * 1.15, cy + math.sin(aa) * rc * 1.15, rad * 0.028))
 
     px = bytearray()
     for y in range(size):
-        px.append(0)  # PNG filter byte: none
+        px.append(0)  # PNG filter byte
         for x in range(size):
-            # rounded-corner alpha mask (standard icon only)
+            # rounded-corner alpha (standard icon only)
             a = 255
             if corner:
                 dx = max(corner - x, x - (size - corner), 0)
                 dy = max(corner - y, y - (size - corner), 0)
                 if dx and dy and (dx * dx + dy * dy) > corner * corner:
                     a = 0
-            # diagonal gradient background
-            t = ((x + y) / (2 * size))
-            col = lerp(TEAL, TEAL_DARK, t)
-            # subtle vignette toward navy at far corner
-            col = lerp(col, NAVY, max(0.0, (t - 0.7)) * 0.9)
+            # washi radial gradient
+            dist_c = math.hypot(x - cx, y - cy) / R
+            col = lerp(WASHI_HI, WASHI_LO, min(1.0, dist_c))
 
-            dcx, dcy = x - cx, y - cy
-            dist = math.hypot(dcx, dcy)
-            # compass ring
-            if ring_r * 0.86 <= dist <= ring_r:
-                col = WHITE
-            # needle
-            if in_triangle(x, y, n_apex, l, r):
-                col = RED
-            elif in_triangle(x, y, s_apex, l, r):
-                col = WHITE
-            # center hub
-            if dist <= (R - inset) * 0.055:
-                col = NAVY
+            # petals (rotated ellipses)
+            for (pcx, pcy, ca, sa) in petals:
+                ddx, ddy = x - pcx, y - pcy
+                xr = ddx * ca + ddy * sa
+                yr = -ddx * sa + ddy * ca
+                e = (xr / pa) ** 2 + (yr / pb) ** 2
+                if e <= 1.0:
+                    col = PETAL_EDGE if e > 0.78 else PETAL
+                    break
+            # notch at each petal tip (carve back to paper)
+            for (nx, ny, nr) in notches:
+                if (x - nx) ** 2 + (y - ny) ** 2 <= nr * nr:
+                    col = lerp(WASHI_HI, WASHI_LO, min(1.0, dist_c))
+                    break
+            # blossom heart + stamens
+            if (x - cx) ** 2 + (y - cy) ** 2 <= rc * rc:
+                col = CENTER
+            for (sx, sy, sr) in stamens:
+                if (x - sx) ** 2 + (y - sy) ** 2 <= sr * sr:
+                    col = STAMEN
+                    break
 
             px.extend((col[0], col[1], col[2], a))
     return png_bytes(size, size, bytes(px))
@@ -98,12 +103,11 @@ def png_bytes(w, h, raw_rgba):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    targets = [
+    for name, size, maskable in [
         ("icon-192.png", 192, False),
         ("icon-512.png", 512, False),
         ("maskable-512.png", 512, True),
-    ]
-    for name, size, maskable in targets:
+    ]:
         data = draw(size, maskable)
         with open(os.path.join(OUT_DIR, name), "wb") as f:
             f.write(data)

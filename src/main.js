@@ -78,7 +78,7 @@ function renderList() {
   view.innerHTML = `
     <div class="capture">
       <input class="capture-input" id="cap" enterkeyhint="done" autocomplete="off"
-        placeholder="Paste a link or type a place + Enter" value="" />
+        placeholder="Paste a link or type a place you love…" value="" />
       <span class="capture-status" id="capStatus"></span>
     </div>
     <input class="search" id="q" placeholder="🔍 Filter…" value="${esc(f.q)}" />
@@ -197,8 +197,8 @@ function cardHtml(it) {
 }
 
 function emptyState() {
-  return `<div class="empty"><div class="big">🧳</div>
-    <p>Nothing here yet — paste a link above and it saves instantly.</p></div>`
+  return `<div class="empty"><div class="big">🌸</div>
+    <p>A quiet place to gather the spots you love.<br>Paste a link above whenever you like — it saves gently on its own.</p></div>`
 }
 
 // ---------- MAP ----------
@@ -216,8 +216,10 @@ function renderMap() {
   const located = applyFilters(state.items).filter((i) => i.lat != null && i.lng != null)
   requestAnimationFrame(() => {
     const map = L.map('map', { zoomControl: true }).setView([20, 10], 2)
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '© OpenStreetMap',
+    // Soft, muted basemap (Carto Positron) — gentler than default OSM tiles.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd',
+      attribution: '© OpenStreetMap © CARTO',
     }).addTo(map)
     const group = []
     for (const it of located) {

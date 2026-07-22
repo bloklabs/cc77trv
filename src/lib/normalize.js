@@ -6,12 +6,12 @@ import { resolveCity } from './geo.js'
 export const CATEGORIES = ['eat', 'stay', 'see', 'do', 'shop', 'other']
 
 export const CATEGORY_META = {
-  eat: { label: 'Eat', emoji: '🍜', color: '#ef4444', defaultVisitMin: 90 },
-  stay: { label: 'Stay', emoji: '🏨', color: '#8b5cf6', defaultVisitMin: 0 },
-  see: { label: 'See', emoji: '🏛️', color: '#0ea5e9', defaultVisitMin: 75 },
-  do: { label: 'Do', emoji: '🎟️', color: '#f59e0b', defaultVisitMin: 120 },
-  shop: { label: 'Shop', emoji: '🛍️', color: '#ec4899', defaultVisitMin: 45 },
-  other: { label: 'Other', emoji: '📍', color: '#64748b', defaultVisitMin: 60 },
+  eat: { label: 'Eat', emoji: '🍜', color: '#d79b86', defaultVisitMin: 90 },   // soft persimmon
+  stay: { label: 'Stay', emoji: '🏨', color: '#a89bc4', defaultVisitMin: 0 },  // wisteria
+  see: { label: 'See', emoji: '🏛️', color: '#8296b4', defaultVisitMin: 75 },   // soft indigo
+  do: { label: 'Do', emoji: '🎟️', color: '#cbb07d', defaultVisitMin: 120 },   // soft gold
+  shop: { label: 'Shop', emoji: '🛍️', color: '#d3a0ad', defaultVisitMin: 45 }, // sakura
+  other: { label: 'Other', emoji: '📍', color: '#9db091', defaultVisitMin: 60 }, // soft sage
 }
 
 const CATEGORY_HINTS = {
