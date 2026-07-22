@@ -33,7 +33,7 @@ const FX_TO_USD = { USD: 1, GBP: 1.27, EUR: 1.08, JPY: 0.0067, KRW: 0.00073, THB
 export function normalizeItem(raw = {}) {
   const url = cleanUrl(raw.url)
   const title = (raw.title || deriveTitleFromUrl(url) || 'Untitled place').trim()
-  const haystack = [title, raw.description, url, (raw.tags || []).join(' ')]
+  const haystack = [title, raw.description, raw.snippet, raw.notes, url, (raw.tags || []).join(' ')]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
@@ -44,14 +44,17 @@ export function normalizeItem(raw = {}) {
 
   const cost = parseCost(raw.costRaw ?? raw.description ?? '')
   const reservation = detectReservation(haystack, category)
+  const cityName = resolved ? resolved.name : (cityGuess ? titleTrim(cityGuess) : null)
+  const booking = bookingDifficulty({ title, category, text: haystack, reservation, override: raw.access })
 
   return {
     url: url || null,
+    mapsUrl: raw.mapsUrl || buildMapsUrl(title, cityName),
     title,
     description: (raw.description || '').trim() || null,
     image: raw.image || null,
     category,
-    city: resolved ? resolved.name : (cityGuess ? titleTrim(cityGuess) : null),
+    city: cityName,
     country: resolved ? resolved.country : (raw.country || null),
     region: resolved ? resolved.region : null,
     lat: numOrNull(raw.lat) ?? (resolved ? resolved.lat : null),
@@ -60,7 +63,8 @@ export function normalizeItem(raw = {}) {
     costRaw: cost.raw || (raw.costRaw || null),
     currency: cost.currency,
     reservation,
-    booking: bookingDifficulty({ title, category, text: haystack, reservation }),
+    booking,
+    access: ACCESS_TIERS.includes(raw.access) ? raw.access : null, // explicit override, if any
     visitMin: numOrNull(raw.visitMin) ?? CATEGORY_META[category].defaultVisitMin,
     hours: (raw.hours || '').toString().trim() || null,
     hoursByDay: raw.hoursByDay && typeof raw.hoursByDay === 'object' ? raw.hoursByDay : null,
@@ -129,8 +133,8 @@ export function parseCost(text) {
 
 export function detectReservation(text, category) {
   const t = (text || '').toLowerCase()
-  const strong = ['reservation required', 'book in advance', 'advance booking', 'tickets required', 'reserve ahead', 'timed entry', 'sold out', 'omakase', 'michelin']
-  const weak = ['reservation', 'booking', 'reserve', 'tickets', 'sold out', 'waitlist']
+  const strong = ['reservation required', 'book well ahead', 'book far ahead', 'book a month', 'months in advance', 'tickets required', 'timed entry', 'omakase', 'michelin', 'impossible to book', 'concierge']
+  const weak = ['reservation', 'booking', 'reserve', 'book ahead', 'reserve ahead', 'tickets', 'sold out', 'waitlist']
   if (strong.some((k) => t.includes(k))) {
     return { required: true, leadDays: t.includes('omakase') || t.includes('michelin') ? 30 : 14, note: 'Advance reservation strongly recommended' }
   }
@@ -148,19 +152,37 @@ export const BOOKING_LABELS = {
   5: 'Very hard — a month+',
 }
 
+// The "how do I get in?" tier the user actually cares about.
+export const ACCESS_TIERS = ['walkin', 'reservation', 'concierge']
+export const ACCESS_META = {
+  walkin: { tier: 'walkin', label: 'Walk-in', hint: 'Just show up', emoji: '🚶' },
+  reservation: { tier: 'reservation', label: 'Reservation', hint: 'Book a table ahead', emoji: '📅' },
+  concierge: { tier: 'concierge', label: 'Concierge', hint: 'Needs advance / concierge help', emoji: '🎩' },
+}
+
 // Notoriously hard tables / must-plan spots — matched by name substring.
 const HARD_TO_BOOK = {
-  ambroisie: 5, arpege: 5, "arpège": 5, plenitude: 5, "plénitude": 5, taillevent: 5,
-  septime: 5, doyenne: 5, "doyenné": 5, dorian: 4, 'noble rot': 4, 'quality wines': 4,
-  'brunswick house': 3, 'le bon georges': 4, parcelles: 4, 'petit sommelier': 3,
+  ambroisie: 5, arpege: 5, 'arpège': 5, plenitude: 5, 'plénitude': 5, taillevent: 5,
+  septime: 5, doyenne: 5, 'doyenné': 5, 'le doyenne': 5, "l'ambroisie": 5,
+  'cheval blanc': 5, 'guy savoy': 5, 'kei ': 5, 'le clarence': 5, 'table du connaisseur': 5,
+  'noma': 5, 'the ledbury': 5, sketch: 4, 'core by clare': 5, 'ikoyi': 4,
+  dorian: 4, 'noble rot': 4, 'quality wines': 4, 'brat': 4, 'lyle': 4, 'st john': 3,
+  'brunswick house': 3, 'le bon georges': 4, parcelles: 4, 'petit sommelier': 3, 'clamato': 4,
+}
+
+function tierFromScore(score) {
+  if (score >= 5) return 'concierge'
+  if (score >= 3) return 'reservation'
+  return 'walkin'
 }
 
 /**
- * Auto-rate how hard something is to book (1 walk-in … 5 plan a month+).
- * Curated hot tables + heuristics from category, reservation lead time, and
- * fine-dining signals. Returns { score, label, reason }.
+ * Auto-rate how hard something is to get into. Returns a 1–5 score AND the
+ * access tier the user asked for: walkin | reservation | concierge.
+ * An explicit `override` (one of ACCESS_TIERS) wins over the heuristic.
+ * @returns {{score:number,label:string,tier:string,tierLabel:string,tierHint:string,reason:string|null}}
  */
-export function bookingDifficulty({ title, category, text, reservation } = {}) {
+export function bookingDifficulty({ title, category, text, reservation, override } = {}) {
   const hay = `${title || ''} ${text || ''}`.toLowerCase()
   let score = { eat: 2, stay: 2, do: 2, see: 1, shop: 1, other: 1 }[category] || 1
   const reasons = []
@@ -168,7 +190,7 @@ export function bookingDifficulty({ title, category, text, reservation } = {}) {
   for (const [name, s] of Object.entries(HARD_TO_BOOK)) {
     if (hay.includes(name)) { score = Math.max(score, s); reasons.push('in-demand spot'); break }
   }
-  if (/michelin|three[- ]star|3[- ]star|two[- ]star|tasting menu|omakase|chef'?s table/.test(hay)) {
+  if (/michelin|three[- ]star|3[- ]star|two[- ]star|\bstarred\b|tasting menu|omakase|chef'?s table|fine dining/.test(hay)) {
     score += 1; reasons.push('fine dining')
   }
   if (reservation) {
@@ -176,10 +198,26 @@ export function bookingDifficulty({ title, category, text, reservation } = {}) {
     if ((reservation.leadDays || 0) >= 30) score += 1
     else if ((reservation.leadDays || 0) >= 14) score += 0.5
   }
-  if (/walk[- ]?in|no (?:reservations?|booking)|first come/.test(hay)) { score = Math.min(score, 2); reasons.push('walk-in') }
+  if (/walk[- ]?in|no (?:reservations?|booking)|first come|counter service|takeaway|to-go|espresso bar|coffee (bar|stand)/.test(hay)) {
+    score = Math.min(score, 2); reasons.push('walk-in')
+  }
 
   score = Math.max(1, Math.min(5, Math.round(score)))
-  return { score, label: BOOKING_LABELS[score], reason: reasons[0] || null }
+  let tier = tierFromScore(score)
+  if (ACCESS_TIERS.includes(override)) {
+    tier = override
+    score = override === 'concierge' ? 5 : override === 'reservation' ? 3 : 1
+    reasons.unshift('set by you')
+  }
+  const meta = ACCESS_META[tier]
+  return { score, label: BOOKING_LABELS[score], tier, tierLabel: meta.label, tierHint: meta.hint, reason: reasons[0] || null }
+}
+
+/** Always-valid Google Maps search link for a place. */
+export function buildMapsUrl(title, city) {
+  const q = [title, city].filter(Boolean).join(' ').trim()
+  if (!q) return null
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
 }
 
 // --- helpers ---

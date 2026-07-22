@@ -113,6 +113,25 @@ export async function replaceAll(records) {
 }
 
 /**
+ * Backfill records saved by older versions so they gain new normalized fields
+ * (maps link, access tier, snippet). Runs once per version bump; safe + cheap.
+ */
+export async function migrateRecords() {
+  const recs = await allRecords()
+  const stale = recs.filter((r) => !r.deleted && (!r.mapsUrl || !r.booking || !r.booking.tier))
+  if (!stale.length) return 0
+  const db = await openDb()
+  const now = new Date().toISOString()
+  await tx(db, 'readwrite', (os) => {
+    for (const r of stale) {
+      const norm = normalizeItem(r)
+      os.put({ ...r, ...norm, id: r.id, createdAt: r.createdAt, updatedAt: r.updatedAt || now, deleted: false })
+    }
+  })
+  return stale.length
+}
+
+/**
  * On first run (store empty + never seeded), load the London/Paris starter set.
  * Idempotent: the SEED_FLAG stops it re-seeding after the user clears items.
  * Returns the number of items seeded.

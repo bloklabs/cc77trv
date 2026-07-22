@@ -3,13 +3,14 @@ import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { registerSW } from 'virtual:pwa-register'
 
-import { CATEGORIES, CATEGORY_META, todaysHours, cleanUrl } from './lib/normalize.js'
+import { CATEGORIES, CATEGORY_META, todaysHours, cleanUrl, ACCESS_TIERS, ACCESS_META } from './lib/normalize.js'
 import { enrichFromUrl } from './lib/enrich.js'
+import { parseBulk } from './lib/bulk.js'
 import { groupByCity, buildItinerary } from './lib/itinerary.js'
 import { itemBlurb, itineraryBlurb } from './lib/blurb.js'
 import { formatDuration } from './lib/transit.js'
 import {
-  allItems, allRecords, saveItem, deleteItem, replaceAll, seedIfEmpty,
+  allItems, allRecords, saveItem, deleteItem, replaceAll, seedIfEmpty, migrateRecords,
   loadSpace, saveSpace, clearSpace,
 } from './lib/store.js'
 import {
@@ -33,6 +34,7 @@ const view = $('#view')
 // ---------- boot ----------
 async function boot() {
   await seedIfEmpty()
+  await migrateRecords()
   state.items = await allItems()
   handleDeepLinks()
   updateSpaceLabel()
@@ -98,7 +100,8 @@ function renderList() {
   })
   cap.addEventListener('paste', (e) => {
     const text = (e.clipboardData || window.clipboardData).getData('text')
-    if (text && /https?:\/\//i.test(text)) {
+    // Auto-process a link, a multi-line dump, or an email of places.
+    if (text && (/https?:\/\//i.test(text) || /\r?\n/.test(text.trim()) || parseBulk(text).length > 1)) {
       e.preventDefault(); cap.value = ''; quickAdd(text)
     }
   })
@@ -126,43 +129,78 @@ function wireCards() {
 }
 
 function onCardClick(e) {
-  const btn = e.target.closest('[data-act]')
+  if (e.target.closest('a')) return // links navigate natively (maps / source)
   const card = e.target.closest('.card')
   if (!card) return
-  const id = card.dataset.id
-  const item = state.items.find((i) => i.id === id)
+  const item = state.items.find((i) => i.id === card.dataset.id)
   if (!item) return
-  const act = btn ? btn.dataset.act : 'open' // tap anywhere else = open link
-  if (act === 'blurb') { copyText(itemBlurb(item), 'Blurb copied for concierge'); e.stopPropagation() }
+  const btn = e.target.closest('button[data-act]')
+  const act = btn ? btn.dataset.act : 'tap'
+  if (act === 'blurb') copyText(itemBlurb(item), 'Blurb copied for concierge')
   else if (act === 'edit') openAddSheet(item)
-  else if (act === 'del') removeItem(id)
-  else if (act === 'open' && item.url) window.open(item.url, '_blank', 'noopener')
+  else if (act === 'del') removeItem(card.dataset.id)
+  else if (act === 'tap') { const u = item.url || item.mapsUrl; if (u) window.open(u, '_blank', 'noopener') }
 }
 
-/** Optimistic instant save, then async enrich in the background. */
+/** Optimistic instant save, then async enrich — handles one place OR many. */
 async function quickAdd(text) {
-  const raw = text.trim()
-  const url = cleanUrl(raw)
+  const candidates = parseBulk(text)
+  if (candidates.length <= 1) return quickAddOne(candidates[0] || { title: text.trim() })
+  return bulkAdd(candidates)
+}
+
+/** Save one candidate immediately, then enrich in the background. */
+async function quickAddOne(c) {
+  const url = c.url ? cleanUrl(c.url) : null
   setCapStatus(url ? '⏳ saving + looking up…' : '⏳ saving…')
-  // 1) instant save so it shows immediately
-  const seed = url ? { url, title: hostTitle(url) } : { title: raw }
-  const saved = await saveItem(seed)
+  const saved = await saveItem({
+    url, title: c.title || (url ? hostTitle(url) : 'New place'),
+    city: c.city || undefined, notes: c.note || undefined,
+  })
   await refresh()
   setCapStatus('✓ added')
   if (state.space) syncNow({ silent: true })
-  // 2) enrich in background (real users' browsers can fetch cross-origin)
-  if (url) {
-    try {
-      const data = await enrichFromUrl(url)
-      if (data && (data.title || data.snippet || data.hoursByDay || data.costRaw)) {
-        await saveItem({ ...saved, ...data, id: saved.id, createdAt: saved.createdAt, title: data.title || saved.title })
-        await refresh()
-        setCapStatus('✓ enriched')
-        if (state.space) syncNow({ silent: true })
-      }
-    } catch { /* keep the optimistic item */ }
-  }
+  if (url) { await enrichInto(saved); if (state.space) syncNow({ silent: true }) }
   setTimeout(() => setCapStatus(''), 1800)
+}
+
+/** Save many candidates at once (an email / list), then enrich links quietly. */
+async function bulkAdd(candidates) {
+  setCapStatus(`⏳ adding ${candidates.length} places…`)
+  const saved = []
+  for (const c of candidates) {
+    const url = c.url ? cleanUrl(c.url) : null
+    saved.push(await saveItem({
+      url, title: c.title || (url ? hostTitle(url) : 'New place'),
+      city: c.city || undefined, notes: c.note || undefined,
+    }))
+  }
+  await refresh()
+  toast(`Added ${saved.length} places`)
+  setCapStatus(`✓ ${saved.length} added`)
+  if (state.space) syncNow({ silent: true })
+  // enrich the ones with links, sequentially so we stay gentle on the network
+  let enriched = 0
+  for (const s of saved) {
+    if (s.url) { if (await enrichInto(s)) enriched++; setCapStatus(`✓ enriching ${enriched}…`) }
+  }
+  await refresh()
+  if (state.space) syncNow({ silent: true })
+  setCapStatus('✓ done')
+  setTimeout(() => setCapStatus(''), 1800)
+}
+
+/** Fetch + merge enrichment onto an already-saved record. Returns true if updated. */
+async function enrichInto(saved) {
+  try {
+    const data = await enrichFromUrl(saved.url)
+    if (data && (data.title || data.snippet || data.hoursByDay || data.costRaw || data.description)) {
+      await saveItem({ ...saved, ...data, id: saved.id, createdAt: saved.createdAt, title: data.title || saved.title })
+      await refresh()
+      return true
+    }
+  } catch { /* keep the optimistic item */ }
+  return false
 }
 
 function setCapStatus(s) { const el = $('#capStatus'); if (el) el.textContent = s }
@@ -177,17 +215,20 @@ function cardHtml(it) {
   const meta = []
   if (it.city) meta.push(`<b>${esc(it.city)}</b>`)
   if (it.costUsd != null) meta.push(`~$${it.costUsd}`)
-  const diff = it.booking ? `<span class="diff d${it.booking.score}" title="${esc(it.booking.label)}">${'●'.repeat(it.booking.score)}${'○'.repeat(5 - it.booking.score)}</span>` : ''
+  const b = it.booking
+  const am = b && ACCESS_META[b.tier]
+  const access = am ? `<span class="access ${b.tier}" title="${esc(b.tierHint || '')}">${esc(am.emoji)} ${esc(b.tierLabel || am.label)}</span>` : ''
   const snippet = it.snippet ? `<div class="snip">${esc(it.snippet)}</div>` : ''
-  const link = it.url ? `<a class="lnk" href="${esc(it.url)}" target="_blank" rel="noopener" data-act="open">↗</a>` : ''
+  const maps = it.mapsUrl ? `<a class="lnk" href="${esc(it.mapsUrl)}" target="_blank" rel="noopener" data-act="maps" title="Open in Google Maps">📍</a>` : ''
+  const link = it.url ? `<a class="lnk" href="${esc(it.url)}" target="_blank" rel="noopener" data-act="open" title="Open source link">↗</a>` : ''
   return `
     <div class="card" data-id="${it.id}">
-      <div class="ico" style="background:${m.color}22">${m.emoji}</div>
+      <div class="ico" style="background:${m.color}33">${m.emoji}</div>
       <div class="body">
-        <div class="row1"><h3>${esc(it.title)}</h3>${diff}</div>
+        <div class="row1"><h3>${esc(it.title)}</h3>${access}</div>
         ${snippet}
         <div class="meta">${meta.join('<i>·</i>')}${hours}
-          ${link}
+          <span class="links">${maps}${link}</span>
           <button class="mini" data-act="blurb" title="Copy concierge blurb">📋</button>
           <button class="mini" data-act="edit" title="Edit">✎</button>
           <button class="mini" data-act="del" title="Delete">✕</button>
@@ -318,6 +359,14 @@ function openAddSheet(existing) {
       <div><label>City</label><input id="fCity" placeholder="e.g. Tokyo" value="${esc(it.city || '')}" /></div>
       <div><label>Cost</label><input id="fCost" placeholder="e.g. $40" value="${esc(it.costRaw || '')}" /></div>
     </div>
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Getting in</label><select id="fAccess">
+        <option value="auto"${!it.access ? ' selected' : ''}>Auto${it.booking ? ` · ${it.booking.tierLabel}` : ''}</option>
+        ${ACCESS_TIERS.map((t) => `<option value="${t}"${it.access === t ? ' selected' : ''}>${ACCESS_META[t].emoji} ${ACCESS_META[t].label}</option>`).join('')}
+      </select></div>
+      <div><label>Opening hours</label><input id="fHours" placeholder="e.g. Mon–Fri 9–17" value="${esc(it.hours || '')}" /></div>
+    </div>
+    <div class="form-row"><label>Short snippet</label><input id="fSnippet" placeholder="One-line description" value="${esc(it.snippet || '')}" /></div>
     <div class="form-row"><label>Notes</label><textarea id="fNotes" placeholder="Why you want to go…">${esc(it.notes || '')}</textarea></div>
     <div class="sheet-actions">
       <button class="btn ghost" data-close>Cancel</button>
@@ -346,6 +395,8 @@ function openAddSheet(existing) {
       if (data.title && !$('#fTitle').value) $('#fTitle').value = data.title
       if (data.city && !$('#fCity').value) $('#fCity').value = data.city
       if (data.costRaw && !$('#fCost').value) $('#fCost').value = data.costRaw
+      if (data.snippet && !$('#fSnippet').value) $('#fSnippet').value = data.snippet
+      if (data.hours && !$('#fHours').value) $('#fHours').value = data.hours
       if (data.description && !$('#fNotes').value) $('#fNotes').value = data.description.slice(0, 200)
       // auto-pick category from enriched text
       if (hint) hint.textContent = data.source === 'enriched' ? '✓ Auto-filled from the link.' : 'Could not read that link — fill in manually.'
@@ -355,11 +406,21 @@ function openAddSheet(existing) {
   }
 
   $('#fSave').addEventListener('click', async () => {
+    const cityVal = $('#fCity').value.trim()
+    const cityChanged = (cityVal || null) !== (it.city || null)
+    const access = $('#fAccess').value
     const raw = {
-      id: it.id, createdAt: it.createdAt,
+      id: it.id, createdAt: it.createdAt, source: it.source,
+      // preserve enrichment the form doesn't expose:
+      image: it.image, description: it.description, hoursByDay: it.hoursByDay,
+      // if the city changed, drop stale coords so they re-resolve:
+      lat: cityChanged ? undefined : it.lat, lng: cityChanged ? undefined : it.lng,
+      // editable fields:
       url: $('#fUrl').value, title: $('#fTitle').value,
-      category: cat, city: $('#fCity').value, costRaw: $('#fCost').value,
-      notes: $('#fNotes').value, source: it.source,
+      category: cat, city: cityVal, costRaw: $('#fCost').value,
+      hours: $('#fHours').value, snippet: $('#fSnippet').value,
+      notes: $('#fNotes').value,
+      access: access === 'auto' ? undefined : access,
     }
     if (!raw.title && !raw.url) { toast('Add a name or a link'); return }
     const saved = await saveItem(raw)

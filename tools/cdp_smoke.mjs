@@ -89,12 +89,21 @@ async function main() {
     try {
       const base = new URL('.', location.href).href
       const s = await import(base + 'src/lib/store.js')
+      const { parseBulk } = await import(base + 'src/lib/bulk.js')
       const saved = await s.saveItem({ title: 'Test Ramen', category: 'eat', city: 'Tokyo', costRaw: '$18', notes: 'smoke' })
+      // bulk email paste → many entries
+      const cands = parseBulk('For Paris\\n- Septime\\n- Motors Espresso\\n- Le Bon Georges')
+      const madeIds = []
+      for (const c of cands) { const r = await s.saveItem({ title: c.title, city: c.city }); madeIds.push(r.id) }
       const items = await s.allItems()
+      const septime = items.find((i) => i.title === 'Septime')
       const b = await import(base + 'src/lib/blurb.js')
       const blurb = b.itemBlurb(saved)
       await s.deleteItem(saved.id)
-      return { ok: true, count: items.length, lat: saved.lat, blurbHasTokyo: blurb.includes('Tokyo') }
+      for (const id of madeIds) await s.deleteItem(id)
+      return { ok: true, count: items.length, lat: saved.lat, blurbHasTokyo: blurb.includes('Tokyo'),
+        bulkParsed: cands.length, septimeTier: septime && septime.booking && septime.booking.tier,
+        septimeMaps: !!(septime && septime.mapsUrl) }
     } catch (e) { return { ok: false, skipped: String(e.message || e) } }
   })()`
   const evalRes = await S('Runtime.evaluate', { expression: exercise, awaitPromise: true, returnByValue: true })

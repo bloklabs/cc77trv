@@ -110,14 +110,16 @@ body {
 .card .meta b { color: var(--text); font-weight: 600; }
 .card .meta i { opacity: .4; font-style: normal; }
 .card .meta .hrs { color: #7f9a77; }
-.card .meta .lnk { color: var(--brand-dark); text-decoration: none; font-weight: 700; padding: 0 2px; margin-left: auto; }
+.card .meta .links { margin-left: auto; display: inline-flex; gap: 6px; }
+.card .meta .lnk { color: var(--brand-dark); text-decoration: none; font-weight: 700; padding: 0 1px; }
 .mini { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 2px 3px; line-height: 1; }
 .mini:active { color: var(--text); }
 
-/* Booking-difficulty dots — soft sage → soft sakura */
-.diff { flex: 0 0 auto; font-size: 8px; letter-spacing: -1px; white-space: nowrap; }
-.diff.d1 { color: #9db98f; } .diff.d2 { color: #b3c58e; } .diff.d3 { color: #d3bd83; }
-.diff.d4 { color: #cfa07f; } .diff.d5 { color: #c58a86; }
+/* Access tier chip — walk-in / reservation / concierge */
+.access { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px; white-space: nowrap; letter-spacing: .2px; }
+.access.walkin { background: rgba(143,174,134,.20); color: #6f9268; }
+.access.reservation { background: rgba(203,176,125,.24); color: #a98a4e; }
+.access.concierge { background: rgba(201,141,151,.22); color: #b3737f; }
 
 .btn {
   background: var(--surface-2); border: 1px solid var(--line); color: var(--text);

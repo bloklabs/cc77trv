@@ -181,6 +181,8 @@ export async function enrichFromUrl(url, opts = {}) {
   const proxies = opts.proxies || PROXIES
   const timeoutMs = opts.timeoutMs || 12000
 
+  const fromUrl = deriveFromUrl(url) // instagram handle / hostname fallback
+
   let lastErr = null
   for (const proxy of proxies) {
     try {
@@ -190,6 +192,11 @@ export async function enrichFromUrl(url, opts = {}) {
       }), timeoutMs)
       if (!body) continue
       const meta = proxy.kind === 'html' ? parseHtmlMetadata(body) : parseTextMetadata(body)
+      meta.title = cleanTitle(meta.title)
+      // Instagram (and other login-walled pages) often only yield a junk title.
+      if (!meta.title || /^instagram|^log in|^login|^page not found/i.test(meta.title)) {
+        meta.title = fromUrl.title || meta.title
+      }
       if (meta.title || meta.description) {
         return { url, source: 'enriched', enrichedVia: proxy.name, ...stripNull(meta) }
       }
@@ -197,8 +204,51 @@ export async function enrichFromUrl(url, opts = {}) {
       lastErr = e
     }
   }
-  // Nothing worked — return the URL so the item is still saveable.
-  return { url, source: 'manual', enrichError: lastErr ? String(lastErr.message || lastErr) : 'no metadata' }
+  // Nothing worked — still return a usable name derived from the URL itself.
+  return { url, title: fromUrl.title, source: 'manual', enrichError: lastErr ? String(lastErr.message || lastErr) : 'no metadata' }
+}
+
+/** Best-effort name from a URL alone (used when fetching fails or is blocked). */
+export function deriveFromUrl(url) {
+  try {
+    const u = new URL(url)
+    const host = u.hostname.replace(/^www\./, '')
+    if (/(^|\.)instagram\.com$/.test(host)) {
+      const parts = u.pathname.split('/').filter(Boolean)
+      // /<handle>/ → profile; /p/<id>, /reel/<id> → no handle available
+      if (parts[0] && !['p', 'reel', 'reels', 'tv', 'explore', 'stories'].includes(parts[0])) {
+        return { title: humanizeHandle(parts[0]), handle: parts[0] }
+      }
+      return { title: 'Instagram find', handle: null }
+    }
+    if (/(^|\.)(maps\.google|goo\.gl|maps\.app\.goo\.gl)/.test(host)) {
+      const q = u.searchParams.get('q') || u.searchParams.get('query')
+      if (q) return { title: decodeURIComponent(q).replace(/\+/g, ' ') }
+    }
+    const last = u.pathname.split('/').filter(Boolean).pop()
+    if (last && !/^\d+$/.test(last)) {
+      return { title: decodeURIComponent(last).replace(/[-_]+/g, ' ').replace(/\.\w+$/, '').replace(/\b\w/g, (c) => c.toUpperCase()) }
+    }
+    return { title: host }
+  } catch {
+    return { title: null }
+  }
+}
+
+function humanizeHandle(h) {
+  return h.replace(/^@/, '').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Strip common site/social suffixes from a scraped title. */
+export function cleanTitle(t) {
+  if (!t) return t
+  return String(t)
+    .replace(/\s*[•|·]\s*Instagram.*$/i, '')
+    .replace(/\s+on Instagram.*$/i, '')
+    .replace(/\s*\(@[^)]+\)\s*/g, ' ')
+    .replace(/\s*[-–|]\s*(Google Maps|Official Site|Home|Menu|Booking|Reservations?)\s*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim() || null
 }
 
 /** Extract a title/description from a plain-text reader dump (jina). */
