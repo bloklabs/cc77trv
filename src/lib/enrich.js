@@ -7,7 +7,7 @@
 
 /** Extract OpenGraph / <title> / meta-description / JSON-LD from raw HTML. */
 export function parseHtmlMetadata(html) {
-  const out = { title: null, description: null, image: null, costRaw: null, lat: null, lng: null, city: null }
+  const out = { title: null, description: null, image: null, costRaw: null, lat: null, lng: null, city: null, hours: null, hoursByDay: null, snippet: null }
   if (!html || typeof html !== 'string') return out
 
   const meta = (prop) => {
@@ -46,6 +46,11 @@ export function parseHtmlMetadata(html) {
       out.city = addr.addressLocality || addr.addressRegion || null
     }
     if (!out.title && it.name) out.title = String(it.name)
+    const oh = it.openingHoursSpecification || it.openingHours || (it.location && it.location.openingHoursSpecification)
+    if (oh && !out.hoursByDay) {
+      const parsed = parseOpeningHours(oh)
+      if (parsed) { out.hoursByDay = parsed.byDay; out.hours = parsed.summary }
+    }
   }
 
   // Bare price fallback from visible text if JSON-LD had none.
@@ -53,7 +58,94 @@ export function parseHtmlMetadata(html) {
     const m = html.match(/[$£€¥]\s?\d[\d.,]{0,7}/)
     if (m) out.costRaw = m[0].trim()
   }
+  out.snippet = makeSnippet(out.description)
   return out
+}
+
+const DAY_IDX = {
+  sunday: 0, sun: 0, su: 0, monday: 1, mon: 1, mo: 1, tuesday: 2, tue: 2, tu: 2,
+  wednesday: 3, wed: 3, we: 3, thursday: 4, thu: 4, th: 4, friday: 5, fri: 5, fr: 5,
+  saturday: 6, sat: 6, sa: 6,
+}
+const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/**
+ * Normalize schema.org opening hours (spec objects OR "Mo-Fr 09:00-17:00"
+ * strings) into { byDay: {0..6: "09:00–17:00"}, summary: "Mon–Sun 11:00–22:00" }.
+ */
+export function parseOpeningHours(oh) {
+  const byDay = {}
+  const specs = Array.isArray(oh) ? oh : [oh]
+  for (const spec of specs) {
+    if (spec && typeof spec === 'object' && (spec.opens || spec.closes || spec.dayOfWeek)) {
+      const days = [].concat(spec.dayOfWeek || []).map(dayName).filter((d) => d != null)
+      const range = fmtRange(spec.opens, spec.closes)
+      for (const d of days) if (range) byDay[d] = range
+    } else if (typeof spec === 'string') {
+      // "Mo-Fr 09:00-17:00", "Sa 10:00-14:00", possibly comma-separated
+      for (const part of spec.split(/[,;]/)) {
+        const m = part.trim().match(/^([A-Za-z]{2,3})(?:\s*[-–]\s*([A-Za-z]{2,3}))?\s+(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/)
+        if (!m) continue
+        const start = dayName(m[1])
+        const end = m[2] ? dayName(m[2]) : start
+        const range = fmtRange(m[3], m[4])
+        if (start == null || !range) continue
+        for (let d = start; ; d = (d + 1) % 7) {
+          byDay[d] = range
+          if (d === end) break
+        }
+      }
+    }
+  }
+  if (!Object.keys(byDay).length) return null
+  return { byDay, summary: summarize(byDay) }
+}
+
+function dayName(v) {
+  if (v == null) return null
+  const s = String(v).toLowerCase().replace(/^https?:\/\/schema\.org\//, '').trim()
+  return DAY_IDX[s] != null ? DAY_IDX[s] : null
+}
+function fmtRange(opens, closes) {
+  const o = trimTime(opens)
+  const c = trimTime(closes)
+  if (!o && !c) return null
+  if (o === '00:00' && (c === '23:59' || c === '00:00')) return 'Open 24h'
+  return `${o || '?'}–${c || '?'}`
+}
+function trimTime(t) {
+  if (!t) return null
+  const m = String(t).match(/(\d{1,2}):(\d{2})/)
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null
+}
+function summarize(byDay) {
+  // Collapse consecutive days sharing the same range into "Mon–Fri 9–5".
+  const parts = []
+  let run = null
+  for (let d = 1; d <= 7; d++) {
+    const idx = d % 7 // Mon..Sun order for readability
+    const r = byDay[idx]
+    if (r && run && run.range === r && run.end === (idx + 6) % 7) {
+      run.end = idx
+    } else {
+      if (run) parts.push(runLabel(run))
+      run = r ? { start: idx, end: idx, range: r } : null
+    }
+  }
+  if (run) parts.push(runLabel(run))
+  return parts.join(', ')
+}
+function runLabel(run) {
+  const days = run.start === run.end ? DAY_ABBR[run.start] : `${DAY_ABBR[run.start]}–${DAY_ABBR[run.end]}`
+  return `${days} ${run.range}`
+}
+
+/** A very short one-line snippet from a description. */
+export function makeSnippet(desc, max = 96) {
+  if (!desc) return null
+  const s = String(desc).replace(/\s+/g, ' ').trim()
+  if (s.length <= max) return s
+  return s.slice(0, max - 1).replace(/[\s,.;:–-]+\S*$/, '') + '…'
 }
 
 function parseJsonLd(html) {

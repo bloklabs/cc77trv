@@ -3,13 +3,13 @@ import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { registerSW } from 'virtual:pwa-register'
 
-import { CATEGORIES, CATEGORY_META } from './lib/normalize.js'
+import { CATEGORIES, CATEGORY_META, todaysHours, cleanUrl } from './lib/normalize.js'
 import { enrichFromUrl } from './lib/enrich.js'
 import { groupByCity, buildItinerary } from './lib/itinerary.js'
 import { itemBlurb, itineraryBlurb } from './lib/blurb.js'
 import { formatDuration } from './lib/transit.js'
 import {
-  allItems, allRecords, saveItem, deleteItem, replaceAll,
+  allItems, allRecords, saveItem, deleteItem, replaceAll, seedIfEmpty,
   loadSpace, saveSpace, clearSpace,
 } from './lib/store.js'
 import {
@@ -32,6 +32,7 @@ const view = $('#view')
 
 // ---------- boot ----------
 async function boot() {
+  await seedIfEmpty()
   state.items = await allItems()
   handleDeepLinks()
   updateSpaceLabel()
@@ -68,22 +69,39 @@ function render() {
   else if (state.tab === 'plan') renderPlan()
 }
 
-// ---------- LIST ----------
+// ---------- LIST (landing = instant capture) ----------
 function renderList() {
   const cities = ['all', ...uniqueCities(state.items)]
   const f = state.filter
   const filtered = applyFilters(state.items)
 
   view.innerHTML = `
-    <input class="search" id="q" placeholder="Search places…" value="${esc(f.q)}" />
+    <div class="capture">
+      <input class="capture-input" id="cap" enterkeyhint="done" autocomplete="off"
+        placeholder="Paste a link or type a place + Enter" value="" />
+      <span class="capture-status" id="capStatus"></span>
+    </div>
+    <input class="search" id="q" placeholder="🔍 Filter…" value="${esc(f.q)}" />
     <div class="filters" id="catFilters">
-      ${['all', ...CATEGORIES].map((c) => filterPill(c, f.category === c, c === 'all' ? 'All' : CATEGORY_META[c].emoji + ' ' + CATEGORY_META[c].label)).join('')}
+      ${['all', ...CATEGORIES].map((c) => filterPill(c, f.category === c, c === 'all' ? 'All' : CATEGORY_META[c].emoji + CATEGORY_META[c].label)).join('')}
     </div>
     <div class="filters" id="cityFilters">
-      ${cities.map((c) => filterPill('city:' + c, f.city === c, c === 'all' ? '🌍 All cities' : '📍 ' + c)).join('')}
+      ${cities.map((c) => filterPill('city:' + c, f.city === c, c === 'all' ? '🌍' : '📍' + c)).join('')}
     </div>
     <div id="cards">${filtered.length ? filtered.map(cardHtml).join('') : emptyState()}</div>
   `
+
+  const cap = $('#cap')
+  cap.focus()
+  cap.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && cap.value.trim()) { const v = cap.value; cap.value = ''; quickAdd(v) }
+  })
+  cap.addEventListener('paste', (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData('text')
+    if (text && /https?:\/\//i.test(text)) {
+      e.preventDefault(); cap.value = ''; quickAdd(text)
+    }
+  })
 
   $('#q').addEventListener('input', (e) => { state.filter.q = e.target.value; renderCards() })
   $('#catFilters').addEventListener('click', (e) => {
@@ -109,35 +127,70 @@ function wireCards() {
 
 function onCardClick(e) {
   const btn = e.target.closest('[data-act]')
-  if (!btn) return
-  const id = btn.closest('.card').dataset.id
+  const card = e.target.closest('.card')
+  if (!card) return
+  const id = card.dataset.id
   const item = state.items.find((i) => i.id === id)
   if (!item) return
-  if (btn.dataset.act === 'blurb') copyText(itemBlurb(item), 'Blurb copied for concierge')
-  else if (btn.dataset.act === 'edit') openAddSheet(item)
-  else if (btn.dataset.act === 'del') removeItem(id)
-  else if (btn.dataset.act === 'open' && item.url) window.open(item.url, '_blank', 'noopener')
+  const act = btn ? btn.dataset.act : 'open' // tap anywhere else = open link
+  if (act === 'blurb') { copyText(itemBlurb(item), 'Blurb copied for concierge'); e.stopPropagation() }
+  else if (act === 'edit') openAddSheet(item)
+  else if (act === 'del') removeItem(id)
+  else if (act === 'open' && item.url) window.open(item.url, '_blank', 'noopener')
+}
+
+/** Optimistic instant save, then async enrich in the background. */
+async function quickAdd(text) {
+  const raw = text.trim()
+  const url = cleanUrl(raw)
+  setCapStatus(url ? '⏳ saving + looking up…' : '⏳ saving…')
+  // 1) instant save so it shows immediately
+  const seed = url ? { url, title: hostTitle(url) } : { title: raw }
+  const saved = await saveItem(seed)
+  await refresh()
+  setCapStatus('✓ added')
+  if (state.space) syncNow({ silent: true })
+  // 2) enrich in background (real users' browsers can fetch cross-origin)
+  if (url) {
+    try {
+      const data = await enrichFromUrl(url)
+      if (data && (data.title || data.snippet || data.hoursByDay || data.costRaw)) {
+        await saveItem({ ...saved, ...data, id: saved.id, createdAt: saved.createdAt, title: data.title || saved.title })
+        await refresh()
+        setCapStatus('✓ enriched')
+        if (state.space) syncNow({ silent: true })
+      }
+    } catch { /* keep the optimistic item */ }
+  }
+  setTimeout(() => setCapStatus(''), 1800)
+}
+
+function setCapStatus(s) { const el = $('#capStatus'); if (el) el.textContent = s }
+function hostTitle(url) {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return 'New place' }
 }
 
 function cardHtml(it) {
   const m = CATEGORY_META[it.category || 'other']
-  const bits = []
-  if (it.city) bits.push(`<b>${esc(it.city)}</b>`)
-  if (it.costUsd != null) bits.push(`~$${it.costUsd}`)
-  if (it.visitMin) bits.push(formatDuration(it.visitMin))
-  const resv = it.reservation && it.reservation.required
-    ? `<span class="badge resv">book ${it.reservation.leadDays}d ahead</span>` : ''
+  const th = todaysHours(it)
+  const hours = th ? `<span class="hrs">🕐 ${esc(th)}</span>` : (it.hours ? `<span class="hrs">🕐 ${esc(it.hours.split(',')[0])}</span>` : '')
+  const meta = []
+  if (it.city) meta.push(`<b>${esc(it.city)}</b>`)
+  if (it.costUsd != null) meta.push(`~$${it.costUsd}`)
+  const diff = it.booking ? `<span class="diff d${it.booking.score}" title="${esc(it.booking.label)}">${'●'.repeat(it.booking.score)}${'○'.repeat(5 - it.booking.score)}</span>` : ''
+  const snippet = it.snippet ? `<div class="snip">${esc(it.snippet)}</div>` : ''
+  const link = it.url ? `<a class="lnk" href="${esc(it.url)}" target="_blank" rel="noopener" data-act="open">↗</a>` : ''
   return `
     <div class="card" data-id="${it.id}">
-      <div class="thumb" style="background:${m.color}22">${m.emoji}</div>
+      <div class="ico" style="background:${m.color}22">${m.emoji}</div>
       <div class="body">
-        <h3>${esc(it.title)}</h3>
-        <div class="meta">${bits.join('<span>·</span>')} ${resv}</div>
-        <div class="actions">
-          <button class="btn primary" data-act="blurb">📋 Blurb</button>
-          ${it.url ? '<button class="btn ghost" data-act="open">↗ Open</button>' : ''}
-          <button class="btn ghost" data-act="edit">Edit</button>
-          <button class="btn ghost danger" data-act="del">Delete</button>
+        <div class="row1"><h3>${esc(it.title)}</h3>${diff}</div>
+        ${snippet}
+        <div class="meta">${meta.join('<i>·</i>')}${hours}
+          ${link}
+          <button class="mini" data-act="blurb" title="Copy concierge blurb">📋</button>
+          <button class="mini" data-act="edit" title="Edit">✎</button>
+          <button class="mini" data-act="del" title="Delete">✕</button>
         </div>
       </div>
     </div>`
@@ -145,7 +198,7 @@ function cardHtml(it) {
 
 function emptyState() {
   return `<div class="empty"><div class="big">🧳</div>
-    <p>No places yet. Tap <b>＋</b> to paste a link or add a spot you want to hit.</p></div>`
+    <p>Nothing here yet — paste a link above and it saves instantly.</p></div>`
 }
 
 // ---------- MAP ----------

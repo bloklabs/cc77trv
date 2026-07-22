@@ -3,11 +3,13 @@
 // consistent. Sync (sync.js) reconciles this local store with the shared blob.
 
 import { normalizeItem } from './normalize.js'
+import { SEED_ITEMS } from './seed.js'
 
 const DB_NAME = 'wander'
 const DB_VERSION = 1
 const STORE = 'items'
 const SPACE_KEY = 'wander.space'
+const SEED_FLAG = 'wander.seeded'
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -108,6 +110,20 @@ export async function replaceAll(records) {
   await tx(db, 'readwrite', (os) => {
     for (const r of records) if (r && r.id) os.put(r)
   })
+}
+
+/**
+ * On first run (store empty + never seeded), load the London/Paris starter set.
+ * Idempotent: the SEED_FLAG stops it re-seeding after the user clears items.
+ * Returns the number of items seeded.
+ */
+export async function seedIfEmpty() {
+  if (localStorage.getItem(SEED_FLAG)) return 0
+  const existing = await allRecords()
+  if (existing.length > 0) { localStorage.setItem(SEED_FLAG, '1'); return 0 }
+  for (const raw of SEED_ITEMS) await saveItem({ ...raw, source: 'seed' })
+  localStorage.setItem(SEED_FLAG, '1')
+  return SEED_ITEMS.length
 }
 
 // --- space config (localStorage) ---

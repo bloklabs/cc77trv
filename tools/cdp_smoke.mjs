@@ -110,7 +110,7 @@ async function main() {
 
   const markers = ['Wander', 'List', 'Map', 'Plan']
   const missing = markers.filter((m) => !bodyText.includes(m))
-  const booted = /Search places|No places yet|Test Ramen/.test(bodyText)
+  const booted = /Paste a link|Nothing here yet|Noble Rot|Test Ramen|Filter/.test(bodyText)
   const fatalJs = jsExceptions.filter((e) => !/favicon|manifest|sw\.js|ServiceWorker|tile\.openstreetmap|allorigins|jina|net::ERR/i.test(e))
 
   console.log('URL:', url)

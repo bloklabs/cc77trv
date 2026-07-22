@@ -12,6 +12,9 @@ export function itemBlurb(item) {
   const where = [item.city, item.country].filter(Boolean).join(', ')
   if (where) lines.push(`Location: ${where}`)
   lines.push(`Type: ${meta.label}`)
+  if (item.snippet) lines.push(item.snippet)
+  if (item.booking) lines.push(`Booking difficulty: ${item.booking.label} (${item.booking.score}/5)`)
+  if (item.hours) lines.push(`Opening hours: ${item.hours}`)
   if (item.costUsd != null) lines.push(`Est. cost: ~$${item.costUsd}${item.costRaw ? ` (${item.costRaw})` : ''} per person`)
   if (item.visitMin) lines.push(`Time to budget: ${formatDuration(item.visitMin)}`)
   if (item.reservation && item.reservation.required) {

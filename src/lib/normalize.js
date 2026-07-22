@@ -60,11 +60,34 @@ export function normalizeItem(raw = {}) {
     costRaw: cost.raw || (raw.costRaw || null),
     currency: cost.currency,
     reservation,
+    booking: bookingDifficulty({ title, category, text: haystack, reservation }),
     visitMin: numOrNull(raw.visitMin) ?? CATEGORY_META[category].defaultVisitMin,
+    hours: (raw.hours || '').toString().trim() || null,
+    hoursByDay: raw.hoursByDay && typeof raw.hoursByDay === 'object' ? raw.hoursByDay : null,
+    snippet: makeSnippet(raw.snippet || raw.description),
     tags: dedupe((raw.tags || []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
     notes: (raw.notes || '').trim() || null,
     source: raw.source || 'manual',
   }
+}
+
+/** A very short one-line snippet from free text. */
+export function makeSnippet(text, max = 96) {
+  if (!text) return null
+  const s = String(text).replace(/\s+/g, ' ').trim()
+  if (!s) return null
+  if (s.length <= max) return s
+  return s.slice(0, max - 1).replace(/[\s,.;:–-]+\S*$/, '') + '…'
+}
+
+/**
+ * Given an item's hoursByDay map, return today's hours string (local day),
+ * or null. Kept here so both UI and blurbs can surface "latest" hours.
+ */
+export function todaysHours(item, dayIdx) {
+  if (!item || !item.hoursByDay) return null
+  const d = dayIdx == null ? new Date().getDay() : dayIdx
+  return item.hoursByDay[d] || item.hoursByDay[String(d)] || null
 }
 
 export function detectCategory(text) {
@@ -115,6 +138,48 @@ export function detectReservation(text, category) {
     return { required: category === 'stay', leadDays: category === 'stay' ? 21 : 3, note: category === 'stay' ? 'Book lodging early' : 'May need a reservation' }
   }
   return { required: false, leadDays: 0, note: null }
+}
+
+export const BOOKING_LABELS = {
+  1: 'Walk-in',
+  2: 'Easy',
+  3: 'Book ahead',
+  4: 'Hard — weeks out',
+  5: 'Very hard — a month+',
+}
+
+// Notoriously hard tables / must-plan spots — matched by name substring.
+const HARD_TO_BOOK = {
+  ambroisie: 5, arpege: 5, "arpège": 5, plenitude: 5, "plénitude": 5, taillevent: 5,
+  septime: 5, doyenne: 5, "doyenné": 5, dorian: 4, 'noble rot': 4, 'quality wines': 4,
+  'brunswick house': 3, 'le bon georges': 4, parcelles: 4, 'petit sommelier': 3,
+}
+
+/**
+ * Auto-rate how hard something is to book (1 walk-in … 5 plan a month+).
+ * Curated hot tables + heuristics from category, reservation lead time, and
+ * fine-dining signals. Returns { score, label, reason }.
+ */
+export function bookingDifficulty({ title, category, text, reservation } = {}) {
+  const hay = `${title || ''} ${text || ''}`.toLowerCase()
+  let score = { eat: 2, stay: 2, do: 2, see: 1, shop: 1, other: 1 }[category] || 1
+  const reasons = []
+
+  for (const [name, s] of Object.entries(HARD_TO_BOOK)) {
+    if (hay.includes(name)) { score = Math.max(score, s); reasons.push('in-demand spot'); break }
+  }
+  if (/michelin|three[- ]star|3[- ]star|two[- ]star|tasting menu|omakase|chef'?s table/.test(hay)) {
+    score += 1; reasons.push('fine dining')
+  }
+  if (reservation) {
+    if (reservation.required) { score += 1; reasons.push('reservation required') }
+    if ((reservation.leadDays || 0) >= 30) score += 1
+    else if ((reservation.leadDays || 0) >= 14) score += 0.5
+  }
+  if (/walk[- ]?in|no (?:reservations?|booking)|first come/.test(hay)) { score = Math.min(score, 2); reasons.push('walk-in') }
+
+  score = Math.max(1, Math.min(5, Math.round(score)))
+  return { score, label: BOOKING_LABELS[score], reason: reasons[0] || null }
 }
 
 // --- helpers ---
