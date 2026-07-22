@@ -1,0 +1,27 @@
+{
+  "name": "optimize-cc77-global-travel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wander — a shared travel wishlist PWA for cc & nana: save places, auto-enrich, map, build itineraries, export concierge blurbs.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "node --check src/lib/normalize.js && node --check src/lib/itinerary.js"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0",
+    "vite": "^5.4.10",
+    "vite-plugin-pwa": "^0.20.5",
+    "vitest": "^2.1.4"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}
