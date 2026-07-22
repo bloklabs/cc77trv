@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="description" content="Wander — save places, auto-enrich, map, and build itineraries together." />
+    <link rel="apple-touch-icon" href="/cc77trv/icons/icon-192.png" />
+    <title>Wander — cc & nana travel wishlist</title>
+    <script type="module" crossorigin src="/cc77trv/assets/index-ClUzn23d.js"></script>
+    <link rel="stylesheet" crossorigin href="/cc77trv/assets/index-335DJ6in.css">
+  <link rel="manifest" href="/cc77trv/manifest.webmanifest"></head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">🧭 <span>Wander</span></div>
+        <button id="spaceBtn" class="chip" title="Shared space">🔗 <span id="spaceLabel">Solo</span></button>
+      </header>
+
+      <main id="view" class="view"></main>
+
+      <nav class="tabbar" role="tablist">
+        <button class="tab is-active" data-tab="list" role="tab">📋<span>List</span></button>
+        <button class="tab" data-tab="map" role="tab">🗺️<span>Map</span></button>
+        <button class="tab" data-tab="plan" role="tab">🧠<span>Plan</span></button>
+      </nav>
+
+      <button id="fab" class="fab" aria-label="Add a place">＋</button>
+    </div>
+
+    <!-- Add / edit sheet -->
+    <div id="sheet" class="sheet" hidden>
+      <div class="sheet-backdrop" data-close></div>
+      <div class="sheet-card" role="dialog" aria-modal="true">
+        <div class="sheet-handle"></div>
+        <div id="sheetBody"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+  </body>
+</html>
