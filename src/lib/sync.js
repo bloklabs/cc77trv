@@ -87,7 +87,7 @@ export class SyncClient {
   /** Create a new blob, returning its id. */
   static async createSpace({ fetchImpl, base } = {}) {
     const f = fetchImpl || fetch.bind(globalThis)
-    const res = await f(base || SYNC_BASE, {
+    const res = await fetchRetry(f, base || SYNC_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ wander: 1, cipher: null }),
@@ -100,20 +100,21 @@ export class SyncClient {
   }
 
   async pull() {
-    const res = await this.fetchImpl(`${this.base}/${this.blobId}`, { headers: { Accept: 'application/json' } })
+    const res = await fetchRetry(this.fetchImpl, `${this.base}/${this.blobId}`, { headers: { Accept: 'application/json' } })
     if (res.status === 404) return []
     if (!res.ok) throw new Error(`pull failed HTTP ${res.status}`)
-    const doc = await res.json()
+    const doc = await res.json().catch(() => null)
     if (!doc || !doc.cipher) return []
     return decryptPayload(this.key, doc.cipher)
   }
 
   async push(items) {
     const cipher = await encryptPayload(this.key, items)
-    const res = await this.fetchImpl(`${this.base}/${this.blobId}`, {
+    const body = JSON.stringify({ wander: 1, cipher, updatedAt: nowStamp() })
+    const res = await fetchRetry(this.fetchImpl, `${this.base}/${this.blobId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ wander: 1, cipher, updatedAt: nowStamp() }),
+      body,
     })
     if (!res.ok) throw new Error(`push failed HTTP ${res.status}`)
     return true
@@ -127,6 +128,29 @@ export class SyncClient {
     return merged
   }
 }
+
+/**
+ * fetch with retry/backoff on transient failures (network error, 429, 5xx).
+ * Makes sync resilient to flaky mobile connections and any host throttling —
+ * the difference between "sync totally failed" and "synced on the 2nd try".
+ */
+export async function fetchRetry(fetchImpl, url, opts = {}, tries = 4) {
+  let lastErr = null
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetchImpl(url, opts)
+      if (res.ok || res.status === 404) return res
+      if (res.status === 429 || res.status >= 500) { lastErr = new Error(`HTTP ${res.status}`) }
+      else return res // 4xx (other than 429) won't get better by retrying
+    } catch (e) {
+      lastErr = e // network/CORS/abort
+    }
+    if (i < tries - 1) await sleep(500 * Math.pow(2, i)) // 0.5s, 1s, 2s
+  }
+  throw lastErr || new Error('request failed')
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // --- base64 helpers (work in browser + node) ---
 function toB64(bytes) {

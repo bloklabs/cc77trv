@@ -69,9 +69,12 @@ export function normalizeItem(raw = {}) {
     hours: (raw.hours || '').toString().trim() || null,
     hoursByDay: raw.hoursByDay && typeof raw.hoursByDay === 'object' ? raw.hoursByDay : null,
     snippet: makeSnippet(raw.snippet || raw.description),
+    website: cleanUrl(raw.website) || null,
     tags: dedupe((raw.tags || []).map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
     notes: (raw.notes || '').trim() || null,
     source: raw.source || 'manual',
+    gatheredAt: raw.gatheredAt || null,
+    gatherVersion: numOrNull(raw.gatherVersion) ?? 0,
   }
 }
 

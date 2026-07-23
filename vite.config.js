@@ -19,8 +19,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'],
       manifest: {
-        name: 'Wander — cc & nana travel wishlist',
-        short_name: 'Wander',
+        name: 'CC77 Wander',
+        short_name: 'CC77 Wander',
         description: 'Save places, auto-enrich, map, and build itineraries together.',
         theme_color: '#f5efe6',
         background_color: '#f5efe6',

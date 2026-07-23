@@ -4,8 +4,17 @@ import L from 'leaflet'
 import { registerSW } from 'virtual:pwa-register'
 
 import { CATEGORIES, CATEGORY_META, todaysHours, cleanUrl, ACCESS_TIERS, ACCESS_META } from './lib/normalize.js'
-import { enrichFromUrl } from './lib/enrich.js'
+import { gatherInfo } from './lib/gather.js'
 import { parseBulk } from './lib/bulk.js'
+import { searchFamous } from './lib/famous.js'
+import { nominatimSuggest } from './lib/places.js'
+import { alertsToFire } from './lib/proximity.js'
+
+// Bump when the info-gathering scripts improve — the background loop then
+// re-runs them on every saved entry so old items pick up the latest data.
+const GATHER_VERSION = 2
+const REFRESH_MS = 10 * 60 * 1000 // sweep all entries ~every 10 min
+const REFRESH_MAX_AGE_MS = 6 * 60 * 60 * 1000 // also refresh anything older than 6h
 import { groupByCity, buildItinerary } from './lib/itinerary.js'
 import { itemBlurb, itineraryBlurb } from './lib/blurb.js'
 import { formatDuration } from './lib/transit.js'
@@ -26,6 +35,9 @@ const state = {
   space: loadSpace(),
   map: null,
   markers: null,
+  geo: { watchId: null, notified: {} },
+  syncError: null,
+  lastSyncedAt: null,
 }
 
 const $ = (s, r = document) => r.querySelector(s)
@@ -40,7 +52,13 @@ async function boot() {
   updateSpaceLabel()
   wireChrome()
   render()
-  if (state.space) syncNow({ silent: true })
+  scheduleSync()
+  startGatherLoop()
+  // resume nearby alerts if the user had them on and permission is still granted
+  if (geoEnabled() && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    startGeo({ prompt: false })
+  }
+  updateGeoChip()
 }
 
 function wireChrome() {
@@ -49,6 +67,7 @@ function wireChrome() {
   )
   $('#fab').addEventListener('click', () => openAddSheet())
   $('#spaceBtn').addEventListener('click', openSpaceSheet)
+  $('#geoBtn').addEventListener('click', toggleGeo)
   $('#sheet').addEventListener('click', (e) => {
     if (e.target.hasAttribute('data-close')) closeSheet()
   })
@@ -82,6 +101,7 @@ function renderList() {
       <input class="capture-input" id="cap" enterkeyhint="done" autocomplete="off"
         placeholder="Paste a link or type a place you love…" value="" />
       <span class="capture-status" id="capStatus"></span>
+      <div class="ac" id="acList" hidden></div>
     </div>
     <input class="search" id="q" placeholder="🔍 Filter…" value="${esc(f.q)}" />
     <div class="filters" id="catFilters">
@@ -96,15 +116,18 @@ function renderList() {
   const cap = $('#cap')
   cap.focus()
   cap.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && cap.value.trim()) { const v = cap.value; cap.value = ''; quickAdd(v) }
+    if (e.key === 'Enter' && cap.value.trim()) { hideAc(); const v = cap.value; cap.value = ''; quickAdd(v) }
+    else if (e.key === 'Escape') hideAc()
   })
   cap.addEventListener('paste', (e) => {
     const text = (e.clipboardData || window.clipboardData).getData('text')
     // Auto-process a link, a multi-line dump, or an email of places.
     if (text && (/https?:\/\//i.test(text) || /\r?\n/.test(text.trim()) || parseBulk(text).length > 1)) {
-      e.preventDefault(); cap.value = ''; quickAdd(text)
+      e.preventDefault(); cap.value = ''; hideAc(); quickAdd(text)
     }
   })
+  cap.addEventListener('input', () => onCaptureInput(cap.value))
+  cap.addEventListener('blur', () => setTimeout(hideAc, 180)) // let a tap register first
 
   $('#q').addEventListener('input', (e) => { state.filter.q = e.target.value; renderCards() })
   $('#catFilters').addEventListener('click', (e) => {
@@ -149,22 +172,26 @@ async function quickAdd(text) {
   return bulkAdd(candidates)
 }
 
-/** Save one candidate immediately, then enrich in the background. */
+/** Save one candidate immediately, then gather info in the background. */
 async function quickAddOne(c) {
   const url = c.url ? cleanUrl(c.url) : null
-  setCapStatus(url ? '⏳ saving + looking up…' : '⏳ saving…')
+  setCapStatus(url ? '⏳ saving + looking up…' : '⏳ saving + finding it…')
   const saved = await saveItem({
     url, title: c.title || (url ? hostTitle(url) : 'New place'),
     city: c.city || undefined, notes: c.note || undefined,
+    lat: c.lat, lng: c.lng, category: c.category,
   })
   await refresh()
   setCapStatus('✓ added')
-  if (state.space) syncNow({ silent: true })
-  if (url) { await enrichInto(saved); if (state.space) syncNow({ silent: true }) }
-  setTimeout(() => setCapStatus(''), 1800)
+  scheduleSync()
+  // Always gather — for a name this geocodes it, for a link it reads the page,
+  // for a Google/maps/share link it resolves and looks the place up.
+  await gatherInto(saved)
+  scheduleSync()
+  setTimeout(() => setCapStatus(''), 1600)
 }
 
-/** Save many candidates at once (an email / list), then enrich links quietly. */
+/** Save many candidates at once (an email / list), then gather quietly. */
 async function bulkAdd(candidates) {
   setCapStatus(`⏳ adding ${candidates.length} places…`)
   const saved = []
@@ -178,29 +205,255 @@ async function bulkAdd(candidates) {
   await refresh()
   toast(`Added ${saved.length} places`)
   setCapStatus(`✓ ${saved.length} added`)
-  if (state.space) syncNow({ silent: true })
-  // enrich the ones with links, sequentially so we stay gentle on the network
-  let enriched = 0
+  scheduleSync()
+  // gather sequentially, gently, so external services aren't hammered
+  let done = 0
   for (const s of saved) {
-    if (s.url) { if (await enrichInto(s)) enriched++; setCapStatus(`✓ enriching ${enriched}…`) }
+    await gatherInto(s)
+    done++
+    setCapStatus(`✓ finding ${done}/${saved.length}…`)
+    await sleep(1200)
   }
   await refresh()
-  if (state.space) syncNow({ silent: true })
+  scheduleSync()
   setCapStatus('✓ done')
-  setTimeout(() => setCapStatus(''), 1800)
+  setTimeout(() => setCapStatus(''), 1600)
 }
 
-/** Fetch + merge enrichment onto an already-saved record. Returns true if updated. */
-async function enrichInto(saved) {
+/**
+ * Run the latest info-gathering on one saved record and merge the results.
+ * Fresh data (hours, coords) is always refreshed; descriptive fields fill only
+ * when empty so manual edits are preserved. Returns true if anything changed.
+ */
+async function gatherInto(rec) {
+  let changed = false
   try {
-    const data = await enrichFromUrl(saved.url)
-    if (data && (data.title || data.snippet || data.hoursByDay || data.costRaw || data.description)) {
-      await saveItem({ ...saved, ...data, id: saved.id, createdAt: saved.createdAt, title: data.title || saved.title })
+    const info = await gatherInfo({ url: rec.url, title: rec.title, city: rec.city })
+    if (info) {
+      const merged = mergeGather(rec, info)
+      merged.gatheredAt = new Date().toISOString()
+      merged.gatherVersion = GATHER_VERSION
+      await saveItem(merged)
       await refresh()
-      return true
+      changed = true
+    } else {
+      // mark attempted so the loop doesn't retry it every cycle
+      await saveItem({ ...rec, gatheredAt: new Date().toISOString(), gatherVersion: GATHER_VERSION })
     }
-  } catch { /* keep the optimistic item */ }
-  return false
+  } catch { /* keep the optimistic item; try again next sweep */ }
+  return changed
+}
+
+/** Merge policy: refresh volatile fields, fill descriptive ones only if empty. */
+function mergeGather(rec, info) {
+  const out = { ...rec, id: rec.id, createdAt: rec.createdAt }
+  const isPlaceholder = !rec.title || rec.title === 'New place' || rec.title === hostTitle(rec.url)
+  for (const k of ['hours', 'hoursByDay', 'lat', 'lng']) if (info[k] != null) out[k] = info[k]
+  for (const k of ['city', 'category', 'snippet', 'costRaw', 'website', 'description', 'image']) {
+    if ((out[k] == null || out[k] === '') && info[k] != null) out[k] = info[k]
+  }
+  if (isPlaceholder && info.title) out.title = info.title
+  // a bare name that resolved to a real website gets that as its openable link
+  if (!out.url && info.website) out.url = info.website
+  return out
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Background sweep: periodically re-run the latest gathering scripts on every
+ * entry. Version-gated + age-gated so we only refetch what's stale, throttled
+ * to stay a good citizen of the free lookup services.
+ */
+async function refreshAllEntries({ force } = {}) {
+  if (state.refreshing) return
+  state.refreshing = true
+  try {
+    const now = Date.now()
+    const stale = state.items.filter((it) => {
+      if (force) return true
+      if ((it.gatherVersion || 0) < GATHER_VERSION) return true
+      if (!it.gatheredAt) return true
+      return now - Date.parse(it.gatheredAt) > REFRESH_MAX_AGE_MS
+    })
+    let n = 0
+    for (const it of stale) {
+      const fresh = state.items.find((x) => x.id === it.id) // may have changed
+      if (!fresh) continue
+      await gatherInto(fresh)
+      if (++n >= 30) break // cap per sweep
+      await sleep(1400)
+    }
+    if (n) scheduleSync()
+  } finally {
+    state.refreshing = false
+  }
+}
+
+function startGatherLoop() {
+  setTimeout(() => refreshAllEntries(), 4000) // shortly after boot
+  setInterval(() => refreshAllEntries(), REFRESH_MS) // ~every 10 min
+}
+
+// ---------- capture autocomplete (famous places, offline-first) ----------
+const AC_CACHE = new Map() // query → suggestions (session cache)
+let acTimer = null
+let acSeq = 0
+
+function onCaptureInput(value) {
+  const v = value.trim()
+  clearTimeout(acTimer)
+  // Don't autocomplete links or multi-line/bulk pastes — those are handled on add.
+  if (v.length < 2 || /https?:\/\//i.test(v) || /[\n,]/.test(v)) return hideAc()
+  // 1) instant offline suggestions from the bundled famous list
+  const local = searchFamous(v, 6).map((p) => ({ ...p, title: p.name, src: 'famous' }))
+  renderAc(v, local)
+  // 2) augment with online results (debounced + cached), if connected
+  acTimer = setTimeout(() => fetchSuggest(v, local), 240)
+}
+
+async function fetchSuggest(v, local) {
+  const key = v.toLowerCase()
+  const seq = ++acSeq
+  let online = AC_CACHE.get(key) || loadAcCache(key)
+  if (!online) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+    try {
+      online = await nominatimSuggest(v, { limit: 6 })
+      AC_CACHE.set(key, online)
+      saveAcCache(key, online)
+    } catch { online = [] }
+  }
+  if (seq !== acSeq) return // a newer keystroke superseded this
+  const merged = dedupeSuggest([...local, ...online.map((s) => ({ ...s, src: 'osm' }))])
+  renderAc(v, merged)
+}
+
+function dedupeSuggest(list) {
+  const seen = new Set()
+  const out = []
+  for (const s of list) {
+    const k = `${(s.title || '').toLowerCase()}|${(s.city || '').toLowerCase()}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(s)
+    if (out.length >= 8) break
+  }
+  return out
+}
+
+function renderAc(query, suggestions) {
+  const el = $('#acList')
+  if (!el) return
+  if (!suggestions.length) return hideAc()
+  el.innerHTML = suggestions.map((s, i) => {
+    const m = CATEGORY_META[s.category || 'other'] || CATEGORY_META.other
+    const where = [s.city, s.country].filter(Boolean).join(', ')
+    return `<button class="ac-item" data-i="${i}"><span class="ac-emoji">${m.emoji}</span>
+      <span class="ac-name">${esc(s.title)}</span>${where ? `<span class="ac-where">${esc(where)}</span>` : ''}</button>`
+  }).join('')
+  el.hidden = false
+  el.onclick = (e) => {
+    const b = e.target.closest('.ac-item'); if (!b) return
+    pickSuggestion(suggestions[Number(b.dataset.i)])
+  }
+}
+
+function hideAc() { const el = $('#acList'); if (el) { el.hidden = true; el.innerHTML = '' } }
+
+function pickSuggestion(s) {
+  hideAc()
+  const cap = $('#cap'); if (cap) cap.value = ''
+  // has coords → fully offline-capable save; still gathers extra detail if online
+  quickAddOne({ title: s.title, city: s.city || undefined, lat: s.lat, lng: s.lng, category: s.category })
+}
+
+function loadAcCache(key) {
+  try {
+    const raw = localStorage.getItem('wander.ac.' + key)
+    if (!raw) return null
+    const { t, v } = JSON.parse(raw)
+    if (Date.now() - t > 7 * 24 * 3600 * 1000) return null // 7-day TTL
+    return v
+  } catch { return null }
+}
+function saveAcCache(key, v) {
+  try { localStorage.setItem('wander.ac.' + key, JSON.stringify({ t: Date.now(), v })) } catch { /* quota */ }
+}
+
+// ---------- proximity alerts (within 100m of a liked place) ----------
+const GEO_KEY = 'wander.geo'
+function geoEnabled() { return localStorage.getItem(GEO_KEY) === '1' }
+
+async function toggleGeo() {
+  if (state.geo && state.geo.watchId != null) { stopGeo(); toast('Nearby alerts off'); return }
+  await startGeo({ prompt: true })
+}
+
+async function startGeo({ prompt } = {}) {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) { toast('Location not available'); return }
+  if (prompt && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try { await Notification.requestPermission() } catch { /* ignore */ }
+  }
+  state.geo = state.geo || { watchId: null, notified: {} }
+  try {
+    state.geo.watchId = navigator.geolocation.watchPosition(onPosition, onGeoErr, {
+      enableHighAccuracy: true, maximumAge: 30000, timeout: 25000,
+    })
+    localStorage.setItem(GEO_KEY, '1')
+    updateGeoChip()
+    if (prompt) toast('Nearby alerts on — I’ll ping you within 100m of a spot')
+  } catch { toast('Could not start location') }
+}
+
+function stopGeo() {
+  if (state.geo && state.geo.watchId != null) navigator.geolocation.clearWatch(state.geo.watchId)
+  if (state.geo) state.geo.watchId = null
+  localStorage.setItem(GEO_KEY, '0')
+  updateGeoChip()
+}
+
+function onGeoErr() { /* permission denied / timeout — stay quiet, keep watching */ }
+
+function onPosition(pos) {
+  if (!state.geo) return
+  const { latitude, longitude } = pos.coords
+  state.geo.lat = latitude
+  state.geo.lng = longitude
+  const fires = alertsToFire(latitude, longitude, state.items, {
+    now: Date.now(), radiusM: 100, cooldownMs: 60 * 60 * 1000, lastNotified: state.geo.notified,
+  })
+  for (const { item, distanceM } of fires) {
+    state.geo.notified[item.id] = Date.now()
+    notifyNear(item, distanceM)
+  }
+}
+
+async function notifyNear(item, distanceM) {
+  const m = CATEGORY_META[item.category || 'other'] || CATEGORY_META.other
+  const title = `📍 Near ${item.title}`
+  const body = `${item.snippet || m.label}${item.hours ? ' · ' + String(item.hours).split(',')[0] : ''} · ${distanceM}m away`
+  const opts = { body, icon: '/cc77trv/icons/icon-192.png', badge: '/cc77trv/icons/icon-192.png', tag: 'near-' + item.id }
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        const reg = await navigator.serviceWorker.ready
+        await reg.showNotification(title, opts)
+      } else {
+        new Notification(title, opts)
+      }
+      return
+    }
+  } catch { /* fall through to in-app toast */ }
+  toast(`${title} · ${distanceM}m`)
+}
+
+function updateGeoChip() {
+  const el = $('#geoBtn')
+  if (!el) return
+  const on = state.geo && state.geo.watchId != null
+  el.classList.toggle('on', !!on)
+  el.textContent = on ? '🔔' : '🔕'
 }
 
 function setCapStatus(s) { const el = $('#capStatus'); if (el) el.textContent = s }
@@ -381,27 +634,31 @@ function openAddSheet(existing) {
     $('#fCat').querySelectorAll('button').forEach((x) => x.classList.toggle('is-active', x === b))
   })
 
-  // Auto-enrich on paste/blur of URL
+  // Auto-gather on paste/blur of the link OR the name (handles URLs, Google
+  // maps/share links, and bare names via the place lookup).
   const urlInput = $('#fUrl')
-  urlInput.addEventListener('change', () => tryEnrich(urlInput.value))
-  if (!isEdit && it.url) tryEnrich(it.url)
+  urlInput.addEventListener('change', () => tryGather())
+  $('#fTitle').addEventListener('change', () => { if (!urlInput.value.trim()) tryGather() })
+  if (!isEdit && it.url) tryGather()
 
-  async function tryEnrich(url) {
-    if (!url || !/^https?:\/\//i.test(url)) return
+  async function tryGather() {
+    const url = urlInput.value.trim()
+    const title = $('#fTitle').value.trim()
+    if (!url && !title) return
     const hint = $('#enrichHint')
     if (hint) hint.innerHTML = '<span class="spinner"></span> Looking it up…'
     try {
-      const data = await enrichFromUrl(url)
+      const data = await gatherInfo({ url: url || null, title, city: $('#fCity').value.trim() || null })
+      if (!data) { if (hint) hint.textContent = 'Nothing found — fill in manually.'; return }
       if (data.title && !$('#fTitle').value) $('#fTitle').value = data.title
       if (data.city && !$('#fCity').value) $('#fCity').value = data.city
       if (data.costRaw && !$('#fCost').value) $('#fCost').value = data.costRaw
       if (data.snippet && !$('#fSnippet').value) $('#fSnippet').value = data.snippet
       if (data.hours && !$('#fHours').value) $('#fHours').value = data.hours
       if (data.description && !$('#fNotes').value) $('#fNotes').value = data.description.slice(0, 200)
-      // auto-pick category from enriched text
-      if (hint) hint.textContent = data.source === 'enriched' ? '✓ Auto-filled from the link.' : 'Could not read that link — fill in manually.'
+      if (hint) hint.textContent = '✓ Auto-filled from the lookup.'
     } catch {
-      if (hint) hint.textContent = 'Could not read that link — fill in manually.'
+      if (hint) hint.textContent = 'Could not look that up — fill in manually.'
     }
   }
 
@@ -427,7 +684,7 @@ function openAddSheet(existing) {
     closeSheet()
     await refresh()
     toast(isEdit ? 'Saved' : `Added ${saved.title}`)
-    if (state.space) syncNow({ silent: true })
+    scheduleSync()
   })
 }
 
@@ -435,7 +692,7 @@ async function removeItem(id) {
   await deleteItem(id)
   await refresh()
   toast('Deleted')
-  if (state.space) syncNow({ silent: true })
+  scheduleSync()
 }
 
 // ---------- SPACE / SYNC ----------
@@ -444,7 +701,7 @@ function openSpaceSheet() {
   $('#sheetBody').innerHTML = sp ? spaceConnectedHtml(sp) : spaceSetupHtml()
   openSheet()
   if (sp) {
-    $('#spSync').addEventListener('click', () => syncNow())
+    $('#spSync').addEventListener('click', async () => { await syncNow(); if (!$('#sheet').hidden) openSpaceSheet() })
     $('#spCopy').addEventListener('click', () => copyText(encodeSpaceCode(sp.blobId, sp.passphrase), 'Space code copied — send to your travel buddy'))
     $('#spLeave').addEventListener('click', () => { clearSpace(); state.space = null; updateSpaceLabel(); closeSheet(); toast('Left shared space') })
   } else {
@@ -463,14 +720,27 @@ function spaceSetupHtml() {
 }
 
 function spaceConnectedHtml(sp) {
+  const status = state.syncError
+    ? `<p class="hint" style="color:#c58a86">⚠ Last sync failed: ${esc(state.syncError)}. It retries automatically — tap “Sync now”.</p>`
+    : state.lastSyncedAt
+      ? `<p class="hint" style="color:#6f9268">✓ Synced ${agoLabel(state.lastSyncedAt)}.</p>`
+      : `<p class="hint">Not synced yet — tap “Sync now”.</p>`
   return `<h2>🔗 Shared space</h2>
-    <p class="hint">You're synced. Share this code so your travel buddy joins the same list:</p>
+    <p class="hint">Share this code so your travel buddy joins the same list:</p>
     <div class="code-box" id="codeBox">${esc(encodeSpaceCode(sp.blobId, sp.passphrase))}</div>
-    <div class="sheet-actions" style="margin-top:14px">
+    ${status}
+    <div class="sheet-actions" style="margin-top:12px">
       <button class="btn" id="spCopy">📋 Copy code</button>
       <button class="btn primary" id="spSync">↻ Sync now</button>
     </div>
     <div class="form-row" style="margin-top:14px"><button class="btn ghost danger" id="spLeave" style="width:100%">Leave space (keeps local data)</button></div>`
+}
+
+function agoLabel(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  return `${Math.round(s / 3600)}h ago`
 }
 
 async function createSpace() {
@@ -498,23 +768,44 @@ async function joinSpace(code) {
   await syncNow()
 }
 
+let syncTimer = null
+let syncInFlight = false
+/** Debounced sync — coalesces a storm of saves (bulk add, gather loop) into one
+ * push so we never hammer the sync host. Use for background/auto syncs. */
+function scheduleSync() {
+  if (!state.space) return
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(() => syncNow({ silent: true }), 2500)
+}
+
 async function syncNow({ silent } = {}) {
   if (!state.space) return
+  if (syncInFlight) { scheduleSync(); return } // don't overlap; retry after
+  syncInFlight = true
   try {
     const key = await deriveKey(state.space.passphrase)
     const client = new SyncClient({ blobId: state.space.blobId, key })
     const local = await allRecords()
     const merged = await client.sync(local)
     await replaceAll(merged)
+    state.syncError = null
+    state.lastSyncedAt = Date.now()
     await refresh()
-    if (!silent) toast('Synced ✓')
+    updateSpaceLabel()
+    if (!silent) toast(`Synced ✓ ${merged.filter((i) => !i.deleted).length} places`)
   } catch (e) {
-    if (!silent) toast('Sync failed (offline?)')
+    state.syncError = String((e && e.message) || e || 'unknown error')
+    updateSpaceLabel()
+    if (!silent) toast(`Sync failed: ${state.syncError}`)
+  } finally {
+    syncInFlight = false
   }
 }
 
 function updateSpaceLabel() {
-  $('#spaceLabel').textContent = state.space ? 'Synced' : 'Solo'
+  const el = $('#spaceLabel')
+  if (!el) return
+  el.textContent = !state.space ? 'Solo' : state.syncError ? '⚠ Sync' : 'Synced'
 }
 
 // ---------- deep links ----------
