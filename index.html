@@ -6,15 +6,21 @@
     <meta name="theme-color" content="#f5efe6" />
     <meta name="description" content="Wander — a gentle place to gather the spots you love." />
     <link rel="apple-touch-icon" href="/cc77trv/icons/icon-192.png" />
-    <title>Wander · そぞろ歩き</title>
-    <script type="module" crossorigin src="/cc77trv/assets/index-COYZ5tWD.js"></script>
-    <link rel="stylesheet" crossorigin href="/cc77trv/assets/index-DShTuoOj.css">
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="CC77 Wander" />
+    <meta name="application-name" content="CC77 Wander" />
+    <title>CC77 Wander · そぞろ歩き</title>
+    <script type="module" crossorigin src="/cc77trv/assets/index-CaLKGC2L.js"></script>
+    <link rel="stylesheet" crossorigin href="/cc77trv/assets/index-BvPolzyU.css">
   <link rel="manifest" href="/cc77trv/manifest.webmanifest"></head>
   <body>
     <div id="app">
       <header class="topbar">
         <div class="brand">🌸 <span>Wander</span></div>
-        <button id="spaceBtn" class="chip" title="Shared space">🪢 <span id="spaceLabel">Solo</span></button>
+        <div class="topbar-actions">
+          <button id="geoBtn" class="chip icon" title="Nearby alerts (within 100m)">🔕</button>
+          <button id="spaceBtn" class="chip" title="Shared space">🪢 <span id="spaceLabel">Solo</span></button>
+        </div>
       </header>
 
       <main id="view" class="view"></main>
