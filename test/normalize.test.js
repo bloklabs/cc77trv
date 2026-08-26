@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeItem, detectCategory, parseCost, detectReservation, cleanUrl, deriveTitleFromUrl } from '../src/lib/normalize.js'
+import {
+  CATEGORIES, DOMAINS, normalizeItem, detectCategory, detectDomain,
+  parseCost, detectReservation, cleanUrl, deriveTitleFromUrl,
+} from '../src/lib/normalize.js'
 
 describe('cleanUrl', () => {
   it('adds https and strips tracking params', () => {
@@ -26,6 +29,38 @@ describe('detectCategory', () => {
   })
   it('falls back to other', () => {
     expect(detectCategory('xyzzy nothing here')).toBe('other')
+  })
+})
+
+describe('research domains', () => {
+  it('covers every OS3 Concierge research area', () => {
+    expect(DOMAINS).toEqual([
+      'travel', 'food', 'beverage', 'wine', 'art', 'entertainment', 'family',
+    ])
+    expect(detectDomain('private villa travel itinerary', 'stay')).toBe('travel')
+    expect(detectDomain('chef tasting menu restaurant', 'eat')).toBe('food')
+    expect(detectDomain('rare whisky and cocktail research', 'eat')).toBe('beverage')
+    expect(detectDomain('Burgundy vineyard and wine cellar', 'eat')).toBe('wine')
+    expect(detectDomain('gallery exhibition and art auction', 'see')).toBe('art')
+    expect(detectDomain('opera theatre premiere', 'do')).toBe('entertainment')
+    expect(detectDomain('family office private aviation security', 'other')).toBe('family')
+  })
+
+  it('keeps specific wine and beverage matches ahead of food', () => {
+    expect(detectDomain('wine pairing dinner', 'eat')).toBe('wine')
+    expect(detectDomain('coffee bar breakfast', 'eat')).toBe('beverage')
+  })
+
+  it('preserves an explicit valid domain and defaults legacy records safely', () => {
+    expect(normalizeItem({ title: 'A museum cafe', category: 'see', domain: 'family' }).domain).toBe('family')
+    expect(normalizeItem({ title: 'Unknown saved thing', category: 'other' }).domain).toBe('travel')
+  })
+
+  it('does not replace or rename the legacy category contract', () => {
+    expect(CATEGORIES).toEqual(['eat', 'stay', 'see', 'do', 'shop', 'other'])
+    const item = normalizeItem({ title: 'Bordeaux cellar visit', category: 'do' })
+    expect(item.category).toBe('do')
+    expect(item.domain).toBe('wine')
   })
 })
 
@@ -67,6 +102,7 @@ describe('normalizeItem', () => {
       city: 'Tokyo',
     })
     expect(it.category).toBe('eat')
+    expect(it.domain).toBe('food')
     expect(it.city).toBe('Tokyo')
     expect(it.lat).toBeCloseTo(35.6762, 2)
     expect(it.reservation.required).toBe(true)

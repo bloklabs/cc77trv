@@ -4,28 +4,46 @@
 //
 // Usage: node tools/cdp_smoke.mjs <url> [--shot out.png]
 import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const CHROME = [
+  process.env.CHROME_PATH,
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/snap/bin/chromium',
+  '/usr/bin/chromium',
+  '/usr/bin/google-chrome',
+].filter(Boolean).find(existsSync)
 const url = process.argv[2]
 const shot = process.argv.includes('--shot') ? process.argv[process.argv.indexOf('--shot') + 1] : null
 if (!url) { console.error('usage: cdp_smoke.mjs <url> [--shot out.png]'); process.exit(2) }
+if (!CHROME) { console.error('Chrome/Chromium not found; set CHROME_PATH'); process.exit(2) }
 
 const PORT = 9222 + Math.floor(Math.random() * 500)
-const profile = mkdtempSync(join(tmpdir(), 'wander-cdp-'))
+const profile = mkdtempSync(join(tmpdir(), 'os3-concierge-cdp-'))
 const chrome = spawn(CHROME, [
   '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
   '--disable-crash-reporter', '--disable-crashpad', '--hide-scrollbars',
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
   '--window-size=430,900',
-], { stdio: 'ignore' })
+], { stdio: ['ignore', 'ignore', 'pipe'] })
+let chromeError = ''
+chrome.stderr.on('data', (chunk) => { chromeError += chunk })
+
+function finish(code) {
+  chrome.kill('SIGKILL')
+  rmSync(profile, { recursive: true, force: true })
+  process.exit(code)
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function getPageWsUrl() {
   for (let i = 0; i < 50; i++) {
+    if (chrome.exitCode != null || chrome.signalCode != null) {
+      throw new Error(`Chrome exited before CDP was ready: ${chromeError.trim() || chrome.exitCode || chrome.signalCode}`)
+    }
     try {
       const r = await fetch(`http://127.0.0.1:${PORT}/json/list`)
       const list = await r.json()
@@ -34,7 +52,7 @@ async function getPageWsUrl() {
     } catch { /* not up yet */ }
     await sleep(200)
   }
-  throw new Error('Chrome CDP did not come up')
+  throw new Error(`Chrome CDP did not come up${chromeError ? `: ${chromeError.trim()}` : ''}`)
 }
 
 function cdp(ws) {
@@ -117,7 +135,7 @@ async function main() {
     if (cap.result?.data) writeFileSync(shot, Buffer.from(cap.result.data, 'base64'))
   }
 
-  const markers = ['Wander', 'List', 'Map', 'Plan']
+  const markers = ['OS3 Concierge', 'List', 'Map', 'Plan']
   const missing = markers.filter((m) => !bodyText.includes(m))
   const booted = /Paste a link|Nothing here yet|Noble Rot|Test Ramen|Filter/.test(bodyText)
   const fatalJs = jsExceptions.filter((e) => !/favicon|manifest|sw\.js|ServiceWorker|tile\.openstreetmap|allorigins|jina|net::ERR/i.test(e))
@@ -133,8 +151,7 @@ async function main() {
 
   const ok = missing.length === 0 && booted && fatalJs.length === 0
   console.log('RESULT:', ok ? 'PASS' : 'FAIL')
-  chrome.kill('SIGKILL')
-  process.exit(ok ? 0 : 1)
+  finish(ok ? 0 : 1)
 }
 
-main().catch((e) => { console.error('smoke error:', e.message); chrome.kill('SIGKILL'); process.exit(1) })
+main().catch((e) => { console.error('smoke error:', e.message); finish(1) })

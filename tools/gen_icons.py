@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Wander PWA icons with no third-party deps (pure-Python PNG writer).
+"""Generate OS3 Concierge PWA icons with no third-party deps (pure-Python PNG writer).
 
 A soft sakura (cherry blossom) on warm washi paper — calm, muted, gentle.
 Outputs icon-192.png, icon-512.png, maskable-512.png into public/icons/.

@@ -33,8 +33,10 @@ body {
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
 }
-.brand { font-family: var(--serif); font-weight: 600; font-size: 19px; letter-spacing: .3px; color: var(--brand-dark); }
+.brand { display: flex; align-items: center; gap: 5px; min-width: 0; font-family: var(--serif); font-weight: 600; font-size: 18px; letter-spacing: .2px; color: var(--brand-dark); white-space: nowrap; }
 .brand span { color: var(--brand-dark); }
+.xray-badge { font: 700 8px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .5px; color: #fff; background: #9f4554; border-radius: 4px; padding: 3px 4px; }
+.xray-badge[hidden] { display: none; }
 .chip {
   background: var(--surface); color: var(--text); border: 1px solid var(--line);
   border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600;
@@ -127,6 +129,7 @@ body {
 .card .meta b { color: var(--text); font-weight: 600; }
 .card .meta i { opacity: .4; font-style: normal; }
 .card .meta .hrs { color: #7f9a77; }
+.card .meta .domain { color: var(--brand-dark); font-weight: 600; }
 .card .meta .links { margin-left: auto; display: inline-flex; gap: 6px; }
 .card .meta .lnk { color: var(--brand-dark); text-decoration: none; font-weight: 700; padding: 0 1px; }
 .mini { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 2px 3px; line-height: 1; }

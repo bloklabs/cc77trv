@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless-Chrome smoke test for the Wander PWA.
+"""Headless-Chrome smoke test for the OS3 Concierge PWA.
 
 Loads a URL in headless Chrome, waits for the SPA to render, then asserts the
 rendered DOM contains expected markers. Also writes a screenshot. Exits non-zero
@@ -12,14 +12,20 @@ import sys
 import tempfile
 import os
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-MARKERS = ["Wander", "List", "Map", "Plan"]  # chrome, tabs
+CHROME = next((path for path in (
+    os.environ.get("CHROME_PATH"),
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/snap/bin/chromium",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome",
+) if path and os.path.exists(path)), None)
+MARKERS = ["OS3 Concierge", "List", "Map", "Plan"]  # chrome, tabs
 # One of these proves main.js booted + rendered a view:
 BOOT_MARKERS = ["No places yet", "wishlist", "Search places", "js-booted", "class=\"card\""]
 
 
 def run_chrome(url, extra):
-    profile = tempfile.mkdtemp(prefix="wander-chrome-")
+    profile = tempfile.mkdtemp(prefix="os3-concierge-chrome-")
     cmd = [
         CHROME, "--headless=new", "--disable-gpu", "--no-sandbox",
         "--no-first-run", "--hide-scrollbars",
@@ -31,6 +37,9 @@ def run_chrome(url, extra):
 
 
 def main():
+    if not CHROME:
+        print("Chrome/Chromium not found; set CHROME_PATH")
+        sys.exit(2)
     if len(sys.argv) < 2:
         print("usage: smoke.py <url> [--shot path]")
         sys.exit(2)
