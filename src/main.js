@@ -3,7 +3,11 @@ import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { registerSW } from 'virtual:pwa-register'
 
-import { CATEGORIES, CATEGORY_META, todaysHours, cleanUrl, ACCESS_TIERS, ACCESS_META } from './lib/normalize.js'
+import {
+  CATEGORIES, CATEGORY_META, DOMAINS, DOMAIN_META,
+  todaysHours, cleanUrl, ACCESS_TIERS, ACCESS_META,
+} from './lib/normalize.js'
+import { LEGACY_COMPAT } from './lib/compat.js'
 import { gatherInfo } from './lib/gather.js'
 import { parseBulk } from './lib/bulk.js'
 import { searchFamous } from './lib/famous.js'
@@ -26,13 +30,16 @@ import {
   deriveKey, SyncClient, encodeSpaceCode, parseSpaceCode, mergeItems,
 } from './lib/sync.js'
 
-registerSW({ immediate: true })
+const XRAY = import.meta.env.VITE_XRAY === '1'
+const APP_BASE = import.meta.env.BASE_URL
+
+if (!XRAY) registerSW({ immediate: true })
 
 const state = {
   tab: 'list',
   items: [],
-  filter: { category: 'all', city: 'all', q: '' },
-  space: loadSpace(),
+  filter: { domain: 'all', category: 'all', city: 'all', q: '' },
+  space: XRAY ? null : loadSpace(),
   map: null,
   markers: null,
   geo: { watchId: null, notified: {} },
@@ -51,9 +58,10 @@ async function boot() {
   handleDeepLinks()
   updateSpaceLabel()
   wireChrome()
+  $('#xrayBadge').hidden = !XRAY
   render()
   scheduleSync()
-  startGatherLoop()
+  if (!XRAY) startGatherLoop()
   // resume nearby alerts if the user had them on and permission is still granted
   if (geoEnabled() && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     startGeo({ prompt: false })
@@ -66,7 +74,7 @@ function wireChrome() {
     t.addEventListener('click', () => setTab(t.dataset.tab))
   )
   $('#fab').addEventListener('click', () => openAddSheet())
-  $('#spaceBtn').addEventListener('click', openSpaceSheet)
+  $('#spaceBtn').addEventListener('click', XRAY ? openXraySheet : openSpaceSheet)
   $('#geoBtn').addEventListener('click', toggleGeo)
   $('#sheet').addEventListener('click', (e) => {
     if (e.target.hasAttribute('data-close')) closeSheet()
@@ -104,6 +112,9 @@ function renderList() {
       <div class="ac" id="acList" hidden></div>
     </div>
     <input class="search" id="q" placeholder="🔍 Filter…" value="${esc(f.q)}" />
+    <div class="filters" id="domainFilters" aria-label="Research area">
+      ${['all', ...DOMAINS].map((d) => filterPill('domain:' + d, f.domain === d, d === 'all' ? 'All research' : DOMAIN_META[d].emoji + ' ' + DOMAIN_META[d].label)).join('')}
+    </div>
     <div class="filters" id="catFilters">
       ${['all', ...CATEGORIES].map((c) => filterPill(c, f.category === c, c === 'all' ? 'All' : CATEGORY_META[c].emoji + CATEGORY_META[c].label)).join('')}
     </div>
@@ -130,6 +141,10 @@ function renderList() {
   cap.addEventListener('blur', () => setTimeout(hideAc, 180)) // let a tap register first
 
   $('#q').addEventListener('input', (e) => { state.filter.q = e.target.value; renderCards() })
+  $('#domainFilters').addEventListener('click', (e) => {
+    const p = e.target.closest('.pill'); if (!p) return
+    state.filter.domain = p.dataset.k.replace(/^domain:/, ''); renderList()
+  })
   $('#catFilters').addEventListener('click', (e) => {
     const p = e.target.closest('.pill'); if (!p) return
     state.filter.category = p.dataset.k; renderList()
@@ -179,7 +194,7 @@ async function quickAddOne(c) {
   const saved = await saveItem({
     url, title: c.title || (url ? hostTitle(url) : 'New place'),
     city: c.city || undefined, notes: c.note || undefined,
-    lat: c.lat, lng: c.lng, category: c.category,
+    lat: c.lat, lng: c.lng, category: c.category, domain: c.domain,
   })
   await refresh()
   setCapStatus('✓ added')
@@ -199,7 +214,7 @@ async function bulkAdd(candidates) {
     const url = c.url ? cleanUrl(c.url) : null
     saved.push(await saveItem({
       url, title: c.title || (url ? hostTitle(url) : 'New place'),
-      city: c.city || undefined, notes: c.note || undefined,
+      city: c.city || undefined, notes: c.note || undefined, domain: c.domain,
     }))
   }
   await refresh()
@@ -249,7 +264,7 @@ function mergeGather(rec, info) {
   const out = { ...rec, id: rec.id, createdAt: rec.createdAt }
   const isPlaceholder = !rec.title || rec.title === 'New place' || rec.title === hostTitle(rec.url)
   for (const k of ['hours', 'hoursByDay', 'lat', 'lng']) if (info[k] != null) out[k] = info[k]
-  for (const k of ['city', 'category', 'snippet', 'costRaw', 'website', 'description', 'image']) {
+  for (const k of ['city', 'category', 'domain', 'snippet', 'costRaw', 'website', 'description', 'image']) {
     if ((out[k] == null || out[k] === '') && info[k] != null) out[k] = info[k]
   }
   if (isPlaceholder && info.title) out.title = info.title
@@ -365,12 +380,12 @@ function pickSuggestion(s) {
   hideAc()
   const cap = $('#cap'); if (cap) cap.value = ''
   // has coords → fully offline-capable save; still gathers extra detail if online
-  quickAddOne({ title: s.title, city: s.city || undefined, lat: s.lat, lng: s.lng, category: s.category })
+  quickAddOne({ title: s.title, city: s.city || undefined, lat: s.lat, lng: s.lng, category: s.category, domain: s.domain })
 }
 
 function loadAcCache(key) {
   try {
-    const raw = localStorage.getItem('wander.ac.' + key)
+    const raw = localStorage.getItem(LEGACY_COMPAT.autocompletePrefix + key)
     if (!raw) return null
     const { t, v } = JSON.parse(raw)
     if (Date.now() - t > 7 * 24 * 3600 * 1000) return null // 7-day TTL
@@ -378,11 +393,11 @@ function loadAcCache(key) {
   } catch { return null }
 }
 function saveAcCache(key, v) {
-  try { localStorage.setItem('wander.ac.' + key, JSON.stringify({ t: Date.now(), v })) } catch { /* quota */ }
+  try { localStorage.setItem(LEGACY_COMPAT.autocompletePrefix + key, JSON.stringify({ t: Date.now(), v })) } catch { /* quota */ }
 }
 
 // ---------- proximity alerts (within 100m of a liked place) ----------
-const GEO_KEY = 'wander.geo'
+const GEO_KEY = LEGACY_COMPAT.geoKey
 function geoEnabled() { return localStorage.getItem(GEO_KEY) === '1' }
 
 async function toggleGeo() {
@@ -433,7 +448,8 @@ async function notifyNear(item, distanceM) {
   const m = CATEGORY_META[item.category || 'other'] || CATEGORY_META.other
   const title = `📍 Near ${item.title}`
   const body = `${item.snippet || m.label}${item.hours ? ' · ' + String(item.hours).split(',')[0] : ''} · ${distanceM}m away`
-  const opts = { body, icon: '/cc77trv/icons/icon-192.png', badge: '/cc77trv/icons/icon-192.png', tag: 'near-' + item.id }
+  const icon = `${APP_BASE}icons/icon-192.png`
+  const opts = { body, icon, badge: icon, tag: 'near-' + item.id }
   try {
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       if (navigator.serviceWorker && navigator.serviceWorker.ready) {
@@ -463,9 +479,11 @@ function hostTitle(url) {
 
 function cardHtml(it) {
   const m = CATEGORY_META[it.category || 'other']
+  const dm = DOMAIN_META[it.domain] || DOMAIN_META.travel
   const th = todaysHours(it)
   const hours = th ? `<span class="hrs">🕐 ${esc(th)}</span>` : (it.hours ? `<span class="hrs">🕐 ${esc(it.hours.split(',')[0])}</span>` : '')
   const meta = []
+  meta.push(`<span class="domain" title="Research area">${esc(dm.emoji)} ${esc(dm.label)}</span>`)
   if (it.city) meta.push(`<b>${esc(it.city)}</b>`)
   if (it.costUsd != null) meta.push(`~$${it.costUsd}`)
   const b = it.booking
@@ -492,7 +510,7 @@ function cardHtml(it) {
 
 function emptyState() {
   return `<div class="empty"><div class="big">🌸</div>
-    <p>A quiet place to gather the spots you love.<br>Paste a link above whenever you like — it saves gently on its own.</p></div>`
+    <p>Gather travel, dining, culture, and family research here.<br>Paste a link above — it saves locally first.</p></div>`
 }
 
 // ---------- MAP ----------
@@ -570,7 +588,7 @@ function renderPlanOut(grouped) {
   const plan = currentPlan(grouped)
   const out = $('#planOut')
   if (!plan.stops.length && !plan.unlocated.length) {
-    out.innerHTML = `<div class="empty"><div class="big">🧠</div><p>Add a few places in this city (with a location) and Wander will order your day.</p></div>`
+    out.innerHTML = `<div class="empty"><div class="big">🧠</div><p>Add a few places in this city (with a location) and OS3 Concierge will order your day.</p></div>`
     return
   }
   const stops = plan.stops.map((s) => {
@@ -601,7 +619,7 @@ function openAddSheet(existing) {
     <div class="form-row">
       <label>Link (paste anything)</label>
       <input id="fUrl" type="url" inputmode="url" placeholder="https://…" value="${esc(it.url || '')}" />
-      ${isEdit ? '' : '<p class="hint" id="enrichHint">Paste a link and Wander auto-fills the details.</p>'}
+      ${isEdit ? '' : '<p class="hint" id="enrichHint">Paste a link and OS3 Concierge auto-fills the details.</p>'}
     </div>
     <div class="form-row"><label>Name</label><input id="fTitle" placeholder="Place name" value="${esc(it.title || '')}" /></div>
     <div class="form-row">
@@ -613,12 +631,16 @@ function openAddSheet(existing) {
       <div><label>Cost</label><input id="fCost" placeholder="e.g. $40" value="${esc(it.costRaw || '')}" /></div>
     </div>
     <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Research area</label><select id="fDomain">
+        <option value="auto"${!it.domain ? ' selected' : ''}>Auto</option>
+        ${DOMAINS.map((d) => `<option value="${d}"${it.domain === d ? ' selected' : ''}>${DOMAIN_META[d].emoji} ${DOMAIN_META[d].label}</option>`).join('')}
+      </select></div>
       <div><label>Getting in</label><select id="fAccess">
         <option value="auto"${!it.access ? ' selected' : ''}>Auto${it.booking ? ` · ${it.booking.tierLabel}` : ''}</option>
         ${ACCESS_TIERS.map((t) => `<option value="${t}"${it.access === t ? ' selected' : ''}>${ACCESS_META[t].emoji} ${ACCESS_META[t].label}</option>`).join('')}
       </select></div>
-      <div><label>Opening hours</label><input id="fHours" placeholder="e.g. Mon–Fri 9–17" value="${esc(it.hours || '')}" /></div>
     </div>
+    <div class="form-row"><label>Opening hours</label><input id="fHours" placeholder="e.g. Mon–Fri 9–17" value="${esc(it.hours || '')}" /></div>
     <div class="form-row"><label>Short snippet</label><input id="fSnippet" placeholder="One-line description" value="${esc(it.snippet || '')}" /></div>
     <div class="form-row"><label>Notes</label><textarea id="fNotes" placeholder="Why you want to go…">${esc(it.notes || '')}</textarea></div>
     <div class="sheet-actions">
@@ -666,6 +688,7 @@ function openAddSheet(existing) {
     const cityVal = $('#fCity').value.trim()
     const cityChanged = (cityVal || null) !== (it.city || null)
     const access = $('#fAccess').value
+    const domain = $('#fDomain').value
     const raw = {
       id: it.id, createdAt: it.createdAt, source: it.source,
       // preserve enrichment the form doesn't expose:
@@ -675,6 +698,7 @@ function openAddSheet(existing) {
       // editable fields:
       url: $('#fUrl').value, title: $('#fTitle').value,
       category: cat, city: cityVal, costRaw: $('#fCost').value,
+      domain: domain === 'auto' ? undefined : domain,
       hours: $('#fHours').value, snippet: $('#fSnippet').value,
       notes: $('#fNotes').value,
       access: access === 'auto' ? undefined : access,
@@ -708,6 +732,13 @@ function openSpaceSheet() {
     $('#spCreate').addEventListener('click', createSpace)
     $('#spJoin').addEventListener('click', () => joinSpace($('#spCode').value))
   }
+}
+
+function openXraySheet() {
+  $('#sheetBody').innerHTML = `<h2>🩻 X-ray workbench</h2>
+    <p class="hint">Tailnet-only local data. Shared-space sync is disabled here, so production ciphertext cannot be changed.</p>
+    <div class="sheet-actions"><button class="btn primary" data-close>Done</button></div>`
+  openSheet()
 }
 
 function spaceSetupHtml() {
@@ -773,13 +804,13 @@ let syncInFlight = false
 /** Debounced sync — coalesces a storm of saves (bulk add, gather loop) into one
  * push so we never hammer the sync host. Use for background/auto syncs. */
 function scheduleSync() {
-  if (!state.space) return
+  if (XRAY || !state.space) return
   clearTimeout(syncTimer)
   syncTimer = setTimeout(() => syncNow({ silent: true }), 2500)
 }
 
 async function syncNow({ silent } = {}) {
-  if (!state.space) return
+  if (XRAY || !state.space) return
   if (syncInFlight) { scheduleSync(); return } // don't overlap; retry after
   syncInFlight = true
   try {
@@ -805,14 +836,14 @@ async function syncNow({ silent } = {}) {
 function updateSpaceLabel() {
   const el = $('#spaceLabel')
   if (!el) return
-  el.textContent = !state.space ? 'Solo' : state.syncError ? '⚠ Sync' : 'Synced'
+  el.textContent = XRAY ? 'Local' : !state.space ? 'Solo' : state.syncError ? '⚠ Sync' : 'Synced'
 }
 
 // ---------- deep links ----------
 function handleDeepLinks() {
   const p = new URLSearchParams(location.search)
   const join = p.get('join')
-  if (join && !state.space) { joinSpace(join); return }
+  if (join && !state.space && !XRAY) { joinSpace(join); return }
   const add = p.get('add') || p.get('url') || p.get('text')
   if (add) {
     history.replaceState(null, '', location.pathname)
@@ -856,10 +887,12 @@ async function copyText(text, okMsg) {
 function applyFilters(items) {
   const f = state.filter
   return items.filter((it) => {
+    if (f.domain !== 'all' && (it.domain || 'travel') !== f.domain) return false
     if (f.category !== 'all' && it.category !== f.category) return false
     if (f.city !== 'all' && it.city !== f.city) return false
     if (f.q) {
-      const hay = [it.title, it.city, it.notes, (it.tags || []).join(' ')].join(' ').toLowerCase()
+      const domain = DOMAIN_META[it.domain] || DOMAIN_META.travel
+      const hay = [it.title, it.city, it.notes, domain.label, (it.tags || []).join(' ')].join(' ').toLowerCase()
       if (!hay.includes(f.q.toLowerCase())) return false
     }
     return true

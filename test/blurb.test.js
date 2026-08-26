@@ -3,7 +3,7 @@ import { itemBlurb, itineraryBlurb } from '../src/lib/blurb.js'
 import { buildItinerary } from '../src/lib/itinerary.js'
 
 const item = {
-  title: 'Sukiyabashi Jiro', category: 'eat', city: 'Tokyo', country: 'Japan',
+  title: 'Sukiyabashi Jiro', category: 'eat', domain: 'food', city: 'Tokyo', country: 'Japan',
   costUsd: 268, costRaw: '¥40,000', visitMin: 90,
   reservation: { required: true, leadDays: 30, note: 'Book via concierge' },
   url: 'https://example.com/jiro', notes: 'bucket list',
@@ -14,6 +14,7 @@ describe('itemBlurb', () => {
     const b = itemBlurb(item)
     expect(b).toContain('Sukiyabashi Jiro')
     expect(b).toContain('Tokyo, Japan')
+    expect(b).toContain('Research area: Food')
     expect(b).toContain('Est. cost')
     expect(b).toContain('REQUIRED')
     expect(b).toContain('30 days')

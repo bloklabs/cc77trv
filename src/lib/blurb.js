@@ -1,7 +1,7 @@
 // Export blurbs: concise, structured text a human OR agent concierge can act on
 // directly — no app context required. Used by the "Copy for concierge" buttons.
 
-import { CATEGORY_META } from './normalize.js'
+import { CATEGORY_META, DOMAIN_META } from './normalize.js'
 import { formatDuration } from './transit.js'
 
 /** A single-option blurb to hand off for one place/item. */
@@ -12,6 +12,8 @@ export function itemBlurb(item) {
   const where = [item.city, item.country].filter(Boolean).join(', ')
   if (where) lines.push(`Location: ${where}`)
   lines.push(`Type: ${meta.label}`)
+  const domain = DOMAIN_META[item.domain]
+  if (domain) lines.push(`Research area: ${domain.label}`)
   if (item.snippet) lines.push(item.snippet)
   if (item.booking) {
     const b = item.booking

@@ -14,6 +14,63 @@ export const CATEGORY_META = {
   other: { label: 'Other', emoji: '📍', color: '#9db091', defaultVisitMin: 60 }, // soft sage
 }
 
+// Additive research taxonomy. The legacy category field above remains intact
+// so old filters, synced records, and itinerary behavior keep working.
+export const DOMAINS = ['travel', 'food', 'beverage', 'wine', 'art', 'entertainment', 'family']
+
+export const DOMAIN_META = {
+  travel: { label: 'Travel', emoji: '✈️' },
+  food: { label: 'Food', emoji: '🍽️' },
+  beverage: { label: 'Beverage', emoji: '🥤' },
+  wine: { label: 'Wine', emoji: '🍷' },
+  art: { label: 'Art', emoji: '🎨' },
+  entertainment: { label: 'Entertainment', emoji: '🎭' },
+  family: { label: 'Family utility', emoji: '🏡' },
+}
+
+// Order is deliberate: specific research areas win before broader matches.
+const DOMAIN_HINTS = {
+  wine: [
+    'wine', 'winery', 'vineyard', 'vintage', 'sommelier', 'cellar', 'bordeaux',
+    'burgundy', 'champagne', 'cabernet', 'pinot', 'riesling', 'barolo', 'cru class',
+  ],
+  beverage: [
+    'beverage', 'cocktail', 'coffee', 'espresso', 'tea ', 'tea room', 'matcha',
+    'brewery', 'beer', 'whisky', 'whiskey', 'bourbon', 'cognac', 'sake', 'spirits',
+    'distillery', 'juice bar', 'non-alcoholic',
+  ],
+  food: [
+    'food', 'restaurant', 'dining', 'dinner', 'lunch', 'brunch', 'breakfast',
+    'chef', 'michelin', 'omakase', 'sushi', 'ramen', 'bakery', 'patisserie',
+    'cuisine', 'tasting menu', 'grocery', 'catering',
+  ],
+  art: [
+    ' art ', 'artist', 'gallery', 'museum', 'sculpture', 'painting', 'exhibition',
+    'art fair', 'auction', 'collectible', 'photography', 'design week', 'biennale',
+    'antique', 'studio visit',
+  ],
+  entertainment: [
+    'entertainment', 'theatre', 'theater', 'cinema', 'concert', 'opera', 'ballet',
+    'festival', 'performance', 'show', 'music venue', 'sporting event', 'game',
+    'nightclub', 'comedy', 'streaming', 'premiere',
+  ],
+  family: [
+    'family office', 'family governance', 'estate planning', 'wealth planning',
+    'private bank', 'tax counsel', 'legal counsel', 'insurance', 'philanthropy',
+    'foundation', 'education', 'school', 'university', 'tutor', 'childcare', 'nanny',
+    'healthcare', 'medical', 'doctor', 'hospital', 'wellness', 'longevity', 'security',
+    'cybersecurity', 'risk management', 'household staff', 'property management',
+    'real estate', 'relocation', 'private aviation', 'private jet', 'yacht', 'marina',
+    'chauffeur', 'driver', 'membership club', 'country club', 'equestrian', 'pet care',
+    'elder care', 'home automation', 'utilities', 'family utility',
+  ],
+  travel: [
+    'travel', 'trip', 'hotel', 'resort', 'ryokan', 'flight', 'airline', 'airport',
+    'train', 'cruise', 'tour', 'destination', 'itinerary', 'villa', 'lodge', 'beach',
+    'ski', 'safari', 'concierge', 'passport', 'visa',
+  ],
+}
+
 const CATEGORY_HINTS = {
   eat: ['restaurant', 'ramen', 'sushi', 'cafe', 'coffee', 'bar', 'izakaya', 'bakery', 'dinner', 'lunch', 'brunch', 'eat', 'food', 'michelin', 'omakase', 'bistro', 'tavern', 'brewery', 'winery', 'dining'],
   stay: ['hotel', 'ryokan', 'hostel', 'resort', 'airbnb', 'stay', 'inn', 'guesthouse', 'lodge', 'booking.com', 'agoda', 'hotels.com', 'suite', 'onsen hotel'],
@@ -27,7 +84,7 @@ const CURRENCY = { '$': 'USD', '£': 'GBP', '€': 'EUR', '¥': 'JPY', '₩': 'K
 const FX_TO_USD = { USD: 1, GBP: 1.27, EUR: 1.08, JPY: 0.0067, KRW: 0.00073, THB: 0.028, CNY: 0.14 }
 
 /**
- * @param {object} raw - { url, title, description, image, category, city, lat, lng, costRaw, notes, tags }
+ * @param {object} raw - { url, title, description, image, category, domain, city, lat, lng, costRaw, notes, tags }
  * @returns {object} normalized item (without id/timestamps — the store assigns those)
  */
 export function normalizeItem(raw = {}) {
@@ -39,6 +96,7 @@ export function normalizeItem(raw = {}) {
     .toLowerCase()
 
   const category = CATEGORIES.includes(raw.category) ? raw.category : detectCategory(haystack)
+  const domain = DOMAINS.includes(raw.domain) ? raw.domain : detectDomain(haystack, category)
   const cityGuess = raw.city || guessCityFromText(haystack)
   const resolved = cityGuess ? resolveCity(cityGuess) : null
 
@@ -54,6 +112,7 @@ export function normalizeItem(raw = {}) {
     description: (raw.description || '').trim() || null,
     image: raw.image || null,
     category,
+    domain,
     city: cityName,
     country: resolved ? resolved.country : (raw.country || null),
     region: resolved ? resolved.region : null,
@@ -109,6 +168,17 @@ export function detectCategory(text) {
     }
   }
   return best
+}
+
+/** Classify broad concierge research without changing the legacy category. */
+export function detectDomain(text, category) {
+  // Padding lets hints such as " art " avoid matching words like "depart".
+  const t = ` ${(text || '').toLowerCase()} `
+  for (const domain of ['wine', 'beverage', 'food', 'art', 'entertainment', 'family', 'travel']) {
+    if (DOMAIN_HINTS[domain].some((hint) => t.includes(hint))) return domain
+  }
+  if (category === 'eat') return 'food'
+  return 'travel'
 }
 
 export function parseCost(text) {

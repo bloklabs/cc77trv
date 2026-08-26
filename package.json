@@ -1,16 +1,17 @@
 {
-  "name": "optimize-cc77-global-travel",
+  "name": "os3-concierge",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Wander — a shared travel wishlist PWA for cc & nana: save places, auto-enrich, map, build itineraries, export concierge blurbs.",
+  "description": "OS3 Concierge — an offline-first PWA for private family travel, dining, culture, and utility research.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --port 4173",
+    "xray": "node scripts/xray-staging.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "node --check src/lib/normalize.js && node --check src/lib/itinerary.js"
+    "lint": "node --check src/main.js && node --check src/lib/compat.js && node --check src/lib/normalize.js && node --check src/lib/store.js && node --check src/lib/sync.js && node --check src/lib/itinerary.js && node --check scripts/xray-staging.mjs && node --check vite.config.js"
   },
   "dependencies": {
     "leaflet": "^1.9.4"

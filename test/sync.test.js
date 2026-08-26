@@ -57,12 +57,17 @@ describe('space code', () => {
 
 describe('SyncClient with injected fetch', () => {
   it('createSpace reads the Location header', async () => {
-    const fetchImpl = async () => ({
-      ok: true, status: 201,
-      headers: { get: (h) => (h === 'Location' ? '/api/jsonBlob/abc123' : null) },
-    })
+    let request
+    const fetchImpl = async (_url, opts) => {
+      request = opts
+      return {
+        ok: true, status: 201,
+        headers: { get: (h) => (h === 'Location' ? '/api/jsonBlob/abc123' : null) },
+      }
+    }
     const id = await SyncClient.createSpace({ fetchImpl })
     expect(id).toBe('abc123')
+    expect(JSON.parse(request.body)).toEqual({ wander: 1, cipher: null })
   })
 
   it('sync pulls, merges, and pushes the union', async () => {

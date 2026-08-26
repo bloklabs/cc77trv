@@ -1,18 +1,25 @@
-name: CI & Deploy
+name: CI & Pages
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: Test & build
+    name: Test, lint & build
     runs-on: ubuntu-latest
+    env:
+      PUBLIC_BASE: /${{ github.event.repository.name }}/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,6 +28,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run lint
       - run: npm run build
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main'
@@ -29,7 +37,7 @@ jobs:
           path: dist
 
   deploy:
-    name: Deploy to GitHub Pages
+    name: Deploy GitHub Pages
     if: github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest

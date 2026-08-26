@@ -4,9 +4,11 @@
 // host only ever stores ciphertext. Local-first: the app works offline and
 // reconciles with the blob via last-write-wins + tombstones.
 
+import { LEGACY_COMPAT } from './compat.js'
+
 const SYNC_BASE = 'https://jsonblob.com/api/jsonBlob'
-const SALT = 'wander-cc77-v1'
-const PBKDF2_ITERS = 100000
+const SALT = LEGACY_COMPAT.pbkdf2Salt
+const PBKDF2_ITERS = LEGACY_COMPAT.pbkdf2Iterations
 
 function subtle() {
   const c = globalThis.crypto
@@ -63,10 +65,11 @@ export function mergeItems(localItems = [], remoteItems = []) {
 
 /** Encode/parse a shareable space code: "wander1.<blobId>.<passphrase>". */
 export function encodeSpaceCode(blobId, passphrase) {
-  return `wander1.${b64url(blobId)}.${b64url(passphrase)}`
+  return `${LEGACY_COMPAT.shareCodePrefix}.${b64url(blobId)}.${b64url(passphrase)}`
 }
 export function parseSpaceCode(code) {
-  const m = String(code || '').trim().match(/^wander1\.([^.]+)\.([^.]+)$/)
+  const prefix = LEGACY_COMPAT.shareCodePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const m = String(code || '').trim().match(new RegExp(`^${prefix}\\.([^.]+)\\.([^.]+)$`))
   if (!m) return null
   try {
     return { blobId: unb64url(m[1]), passphrase: unb64url(m[2]) }
@@ -90,7 +93,7 @@ export class SyncClient {
     const res = await fetchRetry(f, base || SYNC_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ wander: 1, cipher: null }),
+      body: JSON.stringify({ [LEGACY_COMPAT.payloadVersionKey]: LEGACY_COMPAT.payloadVersion, cipher: null }),
     })
     if (!res.ok && res.status !== 201) throw new Error(`create failed HTTP ${res.status}`)
     const loc = res.headers.get('Location') || ''

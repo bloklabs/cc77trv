@@ -4,12 +4,13 @@
 
 import { normalizeItem } from './normalize.js'
 import { SEED_ITEMS } from './seed.js'
+import { LEGACY_COMPAT } from './compat.js'
 
-const DB_NAME = 'wander'
-const DB_VERSION = 1
-const STORE = 'items'
-const SPACE_KEY = 'wander.space'
-const SEED_FLAG = 'wander.seeded'
+const DB_NAME = LEGACY_COMPAT.databaseName
+const DB_VERSION = LEGACY_COMPAT.databaseVersion
+const STORE = LEGACY_COMPAT.itemStore
+const SPACE_KEY = LEGACY_COMPAT.spaceKey
+const SEED_FLAG = LEGACY_COMPAT.seedFlag
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -114,11 +115,11 @@ export async function replaceAll(records) {
 
 /**
  * Backfill records saved by older versions so they gain new normalized fields
- * (maps link, access tier, snippet). Runs once per version bump; safe + cheap.
+ * (maps link, access tier, snippet, research domain). Safe + cheap to repeat.
  */
 export async function migrateRecords() {
   const recs = await allRecords()
-  const stale = recs.filter((r) => !r.deleted && (!r.mapsUrl || !r.booking || !r.booking.tier))
+  const stale = recs.filter((r) => !r.deleted && (!r.mapsUrl || !r.booking || !r.booking.tier || !r.domain))
   if (!stale.length) return 0
   const db = await openDb()
   const now = new Date().toISOString()
