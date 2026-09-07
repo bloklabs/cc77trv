@@ -20,10 +20,12 @@ your Twilio number. [API pricing](https://elevenlabs.io/pricing/api) ·
 
 **Twilio** supplies the caller number and phone network. Upgrade from the trial
 for calls to ordinary restaurant numbers; trial destinations are restricted.
-Buy a voice-capable number you are eligible to use, then enable only your
-intended destination countries in Voice geographic permissions. A local Spanish
-number is not required simply to dial Spain. Twilio may require identity or
-address documents for a purchased number. Create a separate server API key
+Buy a voice-capable number you are eligible to use, or verify an existing number
+you control as an outbound caller ID and import it into ElevenLabs. A verified
+caller ID supports outbound calls only. Enable only your intended destination
+countries in Voice geographic permissions. A local Spanish number is not
+required simply to dial Spain. Twilio may require identity or address documents
+for a purchased number. Create a separate server API key
 for OS3's hangup control. The carrier bill is separate from ElevenLabs.
 [Voice pricing by country](https://www.twilio.com/en-us/voice/pricing) ·
 [Geographic permissions](https://www.twilio.com/docs/voice/api/dialing-permissions-resources).
