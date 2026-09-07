@@ -74,7 +74,7 @@ body {
 /* Tabbar */
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   background: rgba(255,253,249,.94); backdrop-filter: blur(10px);
   border-top: 1px solid var(--line);
   padding-bottom: var(--safe-b);
@@ -212,3 +212,32 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Voice handoff and local reports; existing research remains visible. */
+.voice-page { max-width: 680px; margin: 0 auto; padding-bottom: 40px; overflow-wrap: anywhere; }
+.voice-page h1 { font: 600 25px/1.2 var(--serif); margin: 8px 0; }
+.voice-page h2 { font-size: 18px; margin: 20px 0 8px; }
+.voice-page p { margin: 8px 0; }
+.voice-note { font-size: 13px; color: #74665c; }
+.voice-page label { display: block; font-size: 14px; font-weight: 600; margin: 10px 0; }
+.voice-page input, .voice-page textarea, .voice-page select {
+  display: block; width: 100%; margin-top: 4px; border: 1px solid var(--line);
+  border-radius: 9px; padding: 10px; font-family: inherit; font-size: 16px; line-height: 1.4;
+  color: var(--text); background: var(--surface); min-height: 44px;
+}
+.voice-page textarea { font-family: inherit; resize: vertical; }
+.voice-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.voice-fields > label { min-width: 0; }
+.voice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.voice-page .chip { min-height: 44px; }
+.voice-primary { background: var(--brand-dark); color: white; }
+.voice-link { color: #83505b; display: inline-flex; align-items: center; min-height: 44px; }
+.voice-result { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px; margin: 10px 0; }
+.voice-target { font-size: 24px; line-height: 1.45; }
+.voice-result blockquote { border-left: 3px solid var(--brand); padding-left: 10px; margin: 10px 0; }
+.voice-result blockquote span { font-size: 12px; }
+.voice-delete { display: block; margin-top: 10px; min-height: 44px; }
+.voice-import { margin: 14px 0; }
+.voice-import summary { cursor: pointer; padding: 10px 0; }
+#voiceStatus:not(:empty) { border-left: 3px solid var(--brand-dark); padding: 8px; background: var(--surface); }
+@media (max-width: 350px) { .voice-fields { grid-template-columns: 1fr; gap: 0; } }

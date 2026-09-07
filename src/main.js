@@ -13,6 +13,8 @@ import { parseBulk } from './lib/bulk.js'
 import { searchFamous } from './lib/famous.js'
 import { nominatimSuggest } from './lib/places.js'
 import { alertsToFire } from './lib/proximity.js'
+import { consumeVoiceFragment, readVoice, saveVoiceDraft } from './lib/voice.js'
+import { mountVoice } from './voice-view.js'
 
 // Bump when the info-gathering scripts improve — the background loop then
 // re-runs them on every saved entry so old items pick up the latest data.
@@ -49,17 +51,27 @@ const state = {
 
 const $ = (s, r = document) => r.querySelector(s)
 const view = $('#view')
+let voiceCleanup = null
+let voiceNotice = ''
 
 // ---------- boot ----------
 async function boot() {
+  // Wire visible navigation before asynchronous storage work: an early tap
+  // must not disappear while IndexedDB opens.
+  wireChrome()
+  try {
+    const returned = await consumeVoiceFragment(localStorage, location, history)
+    if (returned) { state.tab = 'voice'; voiceNotice = returned.message }
+  } catch (e) { voiceNotice = e.message }
+  if (state.tab === 'voice') render()
   await seedIfEmpty()
   await migrateRecords()
   state.items = await allItems()
   handleDeepLinks()
   updateSpaceLabel()
-  wireChrome()
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t.dataset.tab === state.tab))
   $('#xrayBadge').hidden = !XRAY
-  render()
+  if (state.tab !== 'voice' || !voiceCleanup) render()
   scheduleSync()
   if (!XRAY) startGatherLoop()
   // resume nearby alerts if the user had them on and permission is still granted
@@ -89,13 +101,20 @@ function setTab(tab) {
 
 async function refresh() {
   state.items = await allItems()
-  render()
+  // Background research must not interrupt voice playback or a typed draft.
+  if (state.tab !== 'voice') render()
 }
 
 function render() {
+  voiceCleanup?.()
+  voiceCleanup = null
   if (state.tab === 'list') renderList()
   else if (state.tab === 'map') renderMap()
   else if (state.tab === 'plan') renderPlan()
+  else if (state.tab === 'voice') {
+    voiceCleanup = mountVoice(view, { notice: voiceNotice, origin: import.meta.env.VITE_OS3_VOICE_ORIGIN || undefined })
+    voiceNotice = ''
+  }
 }
 
 // ---------- LIST (landing = instant capture) ----------
@@ -166,7 +185,7 @@ function wireCards() {
   $('#cards')?.addEventListener('click', onCardClick)
 }
 
-function onCardClick(e) {
+async function onCardClick(e) {
   if (e.target.closest('a')) return // links navigate natively (maps / source)
   const card = e.target.closest('.card')
   if (!card) return
@@ -175,6 +194,13 @@ function onCardClick(e) {
   const btn = e.target.closest('button[data-act]')
   const act = btn ? btn.dataset.act : 'tap'
   if (act === 'blurb') copyText(itemBlurb(item), 'Blurb copied for concierge')
+  else if (act === 'voice') {
+    try {
+      const { draft } = readVoice(localStorage)
+      await saveVoiceDraft(localStorage, { ...draft, ref: item.id, restaurantName: item.title, city: item.city || '', phone: item.phone || '' })
+      setTab('voice')
+    } catch (error) { toast(error.message) }
+  }
   else if (act === 'edit') openAddSheet(item)
   else if (act === 'del') removeItem(card.dataset.id)
   else if (act === 'tap') { const u = item.url || item.mapsUrl; if (u) window.open(u, '_blank', 'noopener') }
@@ -501,6 +527,7 @@ function cardHtml(it) {
         <div class="meta">${meta.join('<i>·</i>')}${hours}
           <span class="links">${maps}${link}</span>
           <button class="mini" data-act="blurb" title="Copy concierge blurb">📋</button>
+          <button class="mini" data-act="voice" title="Speak or call with OS3" aria-label="Speak or call with OS3">🗣️</button>
           <button class="mini" data-act="edit" title="Edit">✎</button>
           <button class="mini" data-act="del" title="Delete">✕</button>
         </div>

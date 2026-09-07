@@ -5,6 +5,8 @@ dist-ssr/
 .DS_Store
 .vite/
 coverage/
+test-results/
+playwright-report/
 /tmp/
 *.log
 .nerv/

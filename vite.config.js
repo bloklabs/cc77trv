@@ -22,6 +22,14 @@ export default defineConfig(({ command }) => {
       include: ['test/**/*.test.js'],
     },
     plugins: [
+      {
+        name: 'os3-release-stamp',
+        generateBundle() {
+          const sha = process.env.VITE_BUILD_SHA || 'dev'
+          if (sha !== 'dev' && !/^[a-f0-9]{40}$/.test(sha)) throw new Error('VITE_BUILD_SHA must be a full commit SHA')
+          this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ app: 'os3-concierge', sha }) + '\n' })
+        },
+      },
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'],
