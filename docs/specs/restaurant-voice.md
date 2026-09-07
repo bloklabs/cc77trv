@@ -1,6 +1,9 @@
 # Restaurant voice — collaboration brief
 
-Status: proposed for joint Astra + Fable 5.1 design review before implementation.
+Status: reviewed before implementation. Fable 5.1 and Astra agreed to OS3
+design commit `7b69f31` in collaboration `grp_b02659881655`; the primary posted
+FINAL DESIGN before implementation. The agreed design and account guide live
+in `unitary-internal/unitary-os3`, under `docs/specs/restaurant-voice-*.md`.
 Requested by the owner on 2026-09-07. Target projects: OS3 and OS3 Concierge.
 
 ## Outcome
