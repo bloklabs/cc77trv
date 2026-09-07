@@ -119,3 +119,13 @@ selected provider and rationale, concrete file/service ownership, API examples,
 storage and lifecycle contract, test plan, rollout/rollback plan, and remaining
 owner account setup. If either exact model is unavailable, report that clearly;
 do not silently substitute a different model or claim consensus.
+
+## First release target
+
+The agreed implementation first deploys to `https://staging.os.unitary.com`
+through OS3's required feature → staging review, CI and automatic deployment.
+Concierge visibly labels this target and binds saved reports to the origin that
+started each request. The OS3 deployment runbook requires a separate reviewed
+`staging` → `main` promotion and manual production deployment; at this decision
+point staging was 142 commits ahead and one behind main. Production voice is not
+claimed ready by this feature release.

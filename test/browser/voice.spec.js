@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { decodeVoice } from '../../src/lib/voice.js'
+import { decodeVoice, VOICE_DEFAULT_ORIGIN } from '../../src/lib/voice.js'
 
 const key = 'os3-concierge.voice.v1'
 const nonce = 'test-browser-request-123456'
@@ -10,11 +10,11 @@ function envelope(kind = 'phrase') {
   return result
 }
 async function pending(page, mode = 'speak', requestNonce = nonce) {
-  await page.evaluate(({ key, nonce, mode }) => {
+  await page.evaluate(({ key, nonce, mode, origin }) => {
     const value = JSON.parse(localStorage.getItem(key) || '{"v":1,"draft":{},"pending":[],"results":[]}')
-    value.pending.push({ nonce, ref: 'desy', mode, label: 'BAR DESY', origin: 'https://os.unitary.com', createdAt: Date.now(), expiresAt: Date.now() + 86400000 })
+    value.pending.push({ nonce, ref: 'desy', mode, label: 'BAR DESY', origin, createdAt: Date.now(), expiresAt: Date.now() + 86400000 })
     localStorage.setItem(key, JSON.stringify(value))
-  }, { key, nonce: requestNonce, mode })
+  }, { key, nonce: requestNonce, mode, origin: VOICE_DEFAULT_ORIGIN })
 }
 async function importReport(page, value) {
   await page.getByText('Import a result copied from OS3', { exact: true }).click()
@@ -47,9 +47,11 @@ test('place launch keeps existing navigation and passes bounded prefill to OS3',
   await expect(page.getByLabel('Restaurant', { exact: true })).toHaveValue(place)
   await page.getByLabel('What would you like to say or ask?').fill('Ask if four burgers remain at 20:15.')
   await page.getByLabel('Restaurant’s language').selectOption('es-ES')
-  await page.route('https://os.unitary.com/**', (route) => route.fulfill({ contentType: 'text/html', body: '<p>OS3 handoff test destination</p>' }))
+  await expect(page.getByText('Voice release: OS3 staging.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'staging.os.unitary.com', exact: true })).toHaveAttribute('href', VOICE_DEFAULT_ORIGIN + '/')
+  await page.route(VOICE_DEFAULT_ORIGIN + '/**', (route) => route.fulfill({ contentType: 'text/html', body: '<p>OS3 handoff test destination</p>' }))
   await page.getByRole('button', { name: 'Speak in OS3', exact: true }).click()
-  await page.waitForURL('https://os.unitary.com/**')
+  await page.waitForURL(VOICE_DEFAULT_ORIGIN + '/**')
   const url = new URL(page.url())
   const request = decodeVoice(url.hash.slice('#voice='.length))
   expect(request.restaurant.name).toBe(place)
@@ -57,6 +59,9 @@ test('place launch keeps existing navigation and passes bounded prefill to OS3',
   expect(request.mode).toBe('speak')
   expect(request.return).toBe('https://bloklabs.github.io/os3-concierge/')
   expect(url.search).toBe('')
+  await page.goBack()
+  const requests = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).pending, key)
+  expect(requests[0].origin).toBe(VOICE_DEFAULT_ORIGIN)
 })
 
 test('import, escaped text, device play/stop/replay and offline reload', async ({ page, context }) => {
@@ -94,7 +99,8 @@ test('call completion remains unconfirmed and includes merchant evidence', async
   await importReport(page, envelope('call'))
   await expect(page.getByText('OS3 reported: reservation unconfirmed.', { exact: true })).toBeVisible()
   await expect(page.getByText('No puedo confirmar.', { exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'View current call in OS3' })).toHaveAttribute('href', 'https://os.unitary.com/#voice-call=call_browser_1')
+  await expect(page.getByRole('link', { name: 'View current call in OS3' })).toHaveAttribute('href', VOICE_DEFAULT_ORIGIN + '/#voice-call=call_browser_1')
+  await expect(page.locator('.voice-result .voice-note').first()).toContainText('Call report from OS3 staging')
   await page.getByRole('button', { name: 'Delete this saved voice result' }).click()
   await expect(page.locator('.voice-result')).toHaveCount(0)
 })

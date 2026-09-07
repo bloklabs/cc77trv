@@ -53,7 +53,7 @@ describe('OS3 voice handoff', () => {
 
   it('persists the request and draft before returning a navigation URL', async () => {
     const store = await ready()
-    expect(readVoice(store).pending[0]).toMatchObject({ nonce, ref: 'bar-desy', mode: 'speak', origin: 'https://os.unitary.com', expiresAt: now + VOICE_TTL_MS })
+    expect(readVoice(store).pending[0]).toMatchObject({ nonce, ref: 'bar-desy', mode: 'speak', origin: 'https://staging.os.unitary.com', expiresAt: now + VOICE_TTL_MS })
     expect(readVoice(store).draft).toEqual(draft)
     expect(store.getItem('wander.space')).toBe('untouched')
     expect(store.setItem).toHaveBeenCalledTimes(1)
@@ -70,7 +70,7 @@ describe('OS3 voice handoff', () => {
     const store = await ready()
     const input = { ...phrase(), secret: 'must-not-persist', origin: 'https://evil.example', phrase: { ...phrase().phrase, secret: 'must-not-persist' } }
     const result = await importVoice(store, JSON.stringify(input), { now: now + 100000 })
-    expect(result.origin).toBe('https://os.unitary.com')
+    expect(result.origin).toBe('https://staging.os.unitary.com')
     expect(result.phrase.target).toContain('cuatro')
     expect(readVoice(store).pending).toEqual([])
     expect(store.getItem(VOICE_KEY)).not.toContain('must-not-persist')
@@ -104,6 +104,13 @@ describe('OS3 voice handoff', () => {
     expect(result.call.merchant.reservation).toBe('unconfirmed')
     expect(result.call.evidence[0].text).toBe('No puedo confirmar.')
     expect(callReportUrl(result)).toBe('https://staging.os.unitary.com/#voice-call=call_123')
+  })
+
+  it.each(['https://os.unitary.com', 'https://staging.os.unitary.com'])('keeps an existing request bound to its own release origin: %s', async (origin) => {
+    const store = await ready('call', { origin })
+    const result = await importVoice(store, encodeVoice({ ...call(), origin: 'https://evil.example' }), { now })
+    expect(result.origin).toBe(origin)
+    expect(callReportUrl(result)).toBe(origin + '/#voice-call=call_123')
   })
 
   it('retains a reconciling snapshot without reporting it as a final outcome', async () => {

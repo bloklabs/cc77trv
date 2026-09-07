@@ -1,5 +1,5 @@
 import {
-  VOICE_LOCALES, OS3_ORIGINS, beginVoice, readVoice, saveVoiceDraft,
+  VOICE_LOCALES, VOICE_DEFAULT_ORIGIN, os3Origin, beginVoice, readVoice, saveVoiceDraft,
   importVoice, validateVoiceResult, deleteVoiceResult, callReportUrl, deviceVoice,
 } from './lib/voice.js'
 
@@ -30,12 +30,13 @@ function resultHtml(saved) {
       <p class="voice-note">Saved report from OS3. Current availability has not been checked by Concierge.</p>
       ${href ? `<a class="chip voice-link" href="${esc(href)}" rel="noreferrer">View current call in OS3</a>` : ''}`
   }
-  return `<article class="voice-result">${saved.label ? `<h3>${esc(saved.label)}</h3>` : ''}<p class="voice-note">${result.kind === 'phrase' ? 'Phrase from OS3' : 'Call report from OS3'} · <time datetime="${esc(result.generatedAt)}">${esc(time)}</time></p>
+  return `<article class="voice-result">${saved.label ? `<h3>${esc(saved.label)}</h3>` : ''}<p class="voice-note">${result.kind === 'phrase' ? 'Phrase from OS3' : 'Call report from OS3'}${saved.origin === 'https://staging.os.unitary.com' ? ' staging' : ''} · <time datetime="${esc(result.generatedAt)}">${esc(time)}</time></p>
     ${body}${result.truncated ? '<p>OS3 shortened this report. Open OS3 for the full record.</p>' : ''}
     <button class="mini voice-delete" data-voice-delete="${esc(result.nonce)}" aria-label="Delete this saved voice result">Delete saved result</button></article>`
 }
 
-export function mountVoice(view, { notice = '', origin = OS3_ORIGINS[0] } = {}) {
+export function mountVoice(view, { notice = '', origin = VOICE_DEFAULT_ORIGIN } = {}) {
+  origin = os3Origin(origin)
   let data, storageError = ''
   try { data = readVoice(localStorage) }
   catch (e) { data = { draft: {}, results: [] }; storageError = e.message }
@@ -44,6 +45,7 @@ export function mountVoice(view, { notice = '', origin = OS3_ORIGINS[0] } = {}) 
     <h1>Speak & call</h1>
     <p>Speak naturally with restaurant staff in their language, or have OS3 call for you.</p>
     <p class="voice-note">Voice opens in OS3 with your usual sign-in. Review the details there before speaking or dialing.</p>
+    ${origin === 'https://staging.os.unitary.com' ? '<p class="voice-note"><strong>Voice release: OS3 staging.</strong> <a href="https://staging.os.unitary.com/" rel="noreferrer">staging.os.unitary.com</a> · Account setup required for paid voice.</p>' : ''}
     <p id="voiceNetwork" class="voice-note"></p>
     <form id="voiceForm">
       <label>What would you like to say or ask? <textarea name="instruction" rows="3" maxlength="2000" required placeholder="Ask if four burgers are still available, and request a table for four at 20:15.">${esc(d.instruction)}</textarea></label>

@@ -4,6 +4,9 @@ export const VOICE_KEY = 'os3-concierge.voice.v1'
 export const VOICE_MAX_BYTES = 8192
 export const VOICE_TTL_MS = 24 * 60 * 60 * 1000
 export const OS3_ORIGINS = ['https://os.unitary.com', 'https://staging.os.unitary.com']
+// Voice first ships through OS3's reviewed staging release. Promote this
+// default only after the production voice route is deployed and verified.
+export const VOICE_DEFAULT_ORIGIN = 'https://staging.os.unitary.com'
 export const CONCIERGE_RETURN = 'https://bloklabs.github.io/os3-concierge/'
 export const VOICE_LOCALES = [
   ['es-ES', 'Spanish · Spain'], ['eu-ES', 'Basque'], ['ca-ES', 'Catalan'],
@@ -29,7 +32,7 @@ function member(value, values, label) {
   return value
 }
 
-export function os3Origin(value = OS3_ORIGINS[0]) {
+export function os3Origin(value = VOICE_DEFAULT_ORIGIN) {
   if (!OS3_ORIGINS.includes(value)) throw new Error('Voice must open on an approved OS3 site.')
   return value
 }
@@ -60,7 +63,7 @@ export function decodeVoice(input) {
   } catch { throw new Error('Voice handoff could not be read.') }
 }
 
-export function buildVoicePrefill(draft, { nonce, origin = OS3_ORIGINS[0] } = {}) {
+export function buildVoicePrefill(draft, { nonce, origin = VOICE_DEFAULT_ORIGIN } = {}) {
   os3Origin(origin)
   if (!noncePattern.test(nonce || '')) throw new Error('A secure voice request could not be created.')
   const value = {

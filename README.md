@@ -24,7 +24,9 @@ latest list on-device and remains useful without a connection.
   a human or agent concierge.
 - **Restaurant voice.** Launch authenticated OS3 speech or restaurant calls with
   your place details. Import phrases and call reports for offline reading;
-  device speech is a labelled fallback. See [voice account setup](docs/voice-setup.md).
+  device speech is a labelled fallback. The first voice release opens
+  [OS3 staging](https://staging.os.unitary.com), visibly labelled in Concierge.
+  See [voice account setup](docs/voice-setup.md).
 - **Private shared spaces.** The original end-to-end encrypted shared-list
   protocol remains supported. The sync host sees ciphertext only.
 

@@ -1,5 +1,10 @@
 # Set up restaurant voice
 
+**First voice release: [OS3 staging](https://staging.os.unitary.com).**
+Concierge labels this destination before you leave. Configure and test the
+staging service first; production voice needs a separate reviewed OS3 promotion
+and deployment. Existing saved reports keep their original OS3 destination.
+
 **You pay the providers directly.** Concierge never asks you to paste an API
 key. The keys belong in the OS3 server's private environment configuration.
 
