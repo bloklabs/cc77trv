@@ -21,15 +21,16 @@ jobs:
     env:
       PUBLIC_BASE: /${{ github.event.repository.name }}/
       VITE_BUILD_SHA: ${{ github.sha }}
-      TMPDIR: ${{ runner.temp }}/concierge
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/concierge/browsers
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-      - run: mkdir -p "$TMPDIR"
+      - name: Prepare job-private scratch
+        run: |
+          mkdir -p "$RUNNER_TEMP/concierge"
+          printf 'TMPDIR=%s\nPLAYWRIGHT_BROWSERS_PATH=%s\n' "$RUNNER_TEMP/concierge" "$RUNNER_TEMP/concierge/browsers" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm test

@@ -9,12 +9,12 @@ function envelope(kind = 'phrase') {
   else result.call = { callId: 'call_browser_1', state: 'completed', merchant: { availability: 'unknown', reservation: 'unconfirmed' }, summary: 'Staff could not confirm a table.', evidence: [{ role: 'user', t: 18, text: 'No puedo confirmar.' }] }
   return result
 }
-async function pending(page, mode = 'speak') {
+async function pending(page, mode = 'speak', requestNonce = nonce) {
   await page.evaluate(({ key, nonce, mode }) => {
     const value = JSON.parse(localStorage.getItem(key) || '{"v":1,"draft":{},"pending":[],"results":[]}')
     value.pending.push({ nonce, ref: 'desy', mode, label: 'BAR DESY', origin: 'https://os.unitary.com', createdAt: Date.now(), expiresAt: Date.now() + 86400000 })
     localStorage.setItem(key, JSON.stringify(value))
-  }, { key, nonce, mode })
+  }, { key, nonce: requestNonce, mode })
 }
 async function importReport(page, value) {
   await page.getByText('Import a result copied from OS3', { exact: true }).click()
@@ -109,3 +109,28 @@ test('offline launch keeps the draft and creates no pending call', async ({ page
   expect(saved.draft.instruction).toBe('Ask for a table for four.')
   expect(saved.pending).toHaveLength(0)
 })
+
+for (const duplicate of [true, false]) {
+  test(`two browser tabs preserve ${duplicate ? 'one-use replay protection' : 'both independent reports'}`, async ({ page, context }) => {
+    await page.getByRole('tab', { name: 'Voice' }).click()
+    await pending(page)
+    const otherNonce = duplicate ? nonce : 'second-browser-request-12345'
+    if (!duplicate) await pending(page, 'speak', otherNonce)
+    const other = await context.newPage()
+    await other.goto(page.url())
+    await other.locator('.capture-input').waitFor()
+    await other.getByRole('tab', { name: 'Voice' }).click()
+    await Promise.all([
+      importReport(page, envelope()),
+      importReport(other, { ...envelope(), nonce: otherNonce }),
+    ])
+    await expect.poll(async () => {
+      const a = await page.locator('#voiceStatus').textContent()
+      const b = await other.locator('#voiceStatus').textContent()
+      return [a, b].filter((s) => /report saved|No matching voice request/.test(s)).length
+    }).toBe(2)
+    const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), key)
+    expect(saved.results).toHaveLength(duplicate ? 1 : 2)
+    expect(saved.pending).toHaveLength(0)
+  })
+}

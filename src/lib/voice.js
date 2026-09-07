@@ -94,22 +94,32 @@ function writeVoice(storage, value) {
   catch { throw new Error('Could not save on this device. Free some storage and try again; your previous voice data is kept.') }
 }
 
-export function saveVoiceDraft(storage, draft) {
-  const value = readVoice(storage)
-  writeVoice(storage, { ...value, draft: { ...draft } })
+function lockedWrite(action) {
+  const locks = globalThis.navigator?.locks
+  if (!locks?.request) throw new Error('Voice needs a secure browser with cross-tab storage locking. Open the HTTPS Concierge app; saved text remains readable.')
+  return locks.request(VOICE_KEY, { mode: 'exclusive' }, async () => action())
 }
 
-export function beginVoice(storage, draft, { origin, nonce = globalThis.crypto.randomUUID(), now = Date.now() } = {}) {
-  const handoff = buildVoicePrefill(draft, { origin, nonce })
-  const value = readVoice(storage)
-  const pending = value.pending.filter((p) => p.expiresAt > now)
-  if (pending.some((p) => p.nonce === nonce) || value.results.some((p) => p.nonce === nonce)) throw new Error('Voice request already exists.')
-  if (pending.length >= 100) throw new Error('Too many outstanding voice requests. Finish a request before starting another.')
-  pending.push({ nonce, ref: handoff.value.ref, mode: handoff.value.mode, label: handoff.value.restaurant?.name || '', origin: os3Origin(origin), createdAt: now, expiresAt: now + VOICE_TTL_MS })
-  // One storage write persists the nonce before navigation. Storage failure
-  // prevents launch instead of losing the only way to validate the return.
-  writeVoice(storage, { ...value, draft: { ...draft }, pending })
-  return handoff.url
+export async function saveVoiceDraft(storage, draft) {
+  return lockedWrite(() => {
+    const value = readVoice(storage)
+    writeVoice(storage, { ...value, draft: { ...draft } })
+  })
+}
+
+export async function beginVoice(storage, draft, { origin, nonce = globalThis.crypto.randomUUID(), now = Date.now() } = {}) {
+  return lockedWrite(() => {
+    const handoff = buildVoicePrefill(draft, { origin, nonce })
+    const value = readVoice(storage)
+    const pending = value.pending.filter((p) => p.expiresAt > now)
+    if (pending.some((p) => p.nonce === nonce) || value.results.some((p) => p.nonce === nonce)) throw new Error('Voice request already exists.')
+    if (pending.length >= 100) throw new Error('Too many outstanding voice requests. Finish a request before starting another.')
+    pending.push({ nonce, ref: handoff.value.ref, mode: handoff.value.mode, label: handoff.value.restaurant?.name || '', origin: os3Origin(origin), createdAt: now, expiresAt: now + VOICE_TTL_MS })
+    // One storage write persists the nonce before navigation. Storage failure
+    // prevents launch instead of losing the only way to validate the return.
+    writeVoice(storage, { ...value, draft: { ...draft }, pending })
+    return handoff.url
+  })
 }
 
 export function validateVoiceResult(value) {
@@ -162,33 +172,37 @@ export function validateVoiceResult(value) {
   return result
 }
 
-export function importVoice(storage, input, { now = Date.now() } = {}) {
-  const result = validateVoiceResult(decodeVoice(input))
-  const value = readVoice(storage)
-  const pending = value.pending.find((p) => p.nonce === result.nonce)
-  if (!pending || pending.expiresAt <= now) throw new Error('No matching voice request on this device, or it expired. Import into the browser that started it within 24 hours.')
-  if (pending.ref !== result.ref || (pending.mode === 'speak' ? 'phrase' : 'call') !== result.kind) throw new Error('This result does not match the requested place or voice mode.')
-  const saved = { ...result, label: pending.label || '', origin: os3Origin(pending.origin), receivedAt: new Date(now).toISOString() }
-  writeVoice(storage, { ...value, pending: value.pending.filter((p) => p.nonce !== result.nonce), results: [saved, ...value.results] })
-  return saved
+export async function importVoice(storage, input, { now = Date.now() } = {}) {
+  return lockedWrite(() => {
+    const result = validateVoiceResult(decodeVoice(input))
+    const value = readVoice(storage)
+    const pending = value.pending.find((p) => p.nonce === result.nonce)
+    if (!pending || pending.expiresAt <= now) throw new Error('No matching voice request on this device, or it expired. Import into the browser that started it within 24 hours.')
+    if (pending.ref !== result.ref || (pending.mode === 'speak' ? 'phrase' : 'call') !== result.kind) throw new Error('This result does not match the requested place or voice mode.')
+    const saved = { ...result, label: pending.label || '', origin: os3Origin(pending.origin), receivedAt: new Date(now).toISOString() }
+    writeVoice(storage, { ...value, pending: value.pending.filter((p) => p.nonce !== result.nonce), results: [saved, ...value.results] })
+    return saved
+  })
 }
 
-export function consumeVoiceFragment(storage, location, history) {
+export async function consumeVoiceFragment(storage, location, history) {
   if (!location.hash.startsWith('#os3-voice=')) return null
   const input = location.hash.slice('#os3-voice='.length)
   // Fragments are untrusted even when source says OS3. Clear invalid input too.
   history.replaceState(null, '', location.pathname + location.search)
   try {
     if (location.origin + location.pathname !== CONCIERGE_RETURN) throw new Error('Open returned voice reports in the original Concierge app, or paste the result there.')
-    importVoice(storage, input)
+    await importVoice(storage, input)
     return { ok: true, message: 'OS3 report saved on this device.' }
   }
   catch (e) { return { ok: false, message: e.message } }
 }
 
-export function deleteVoiceResult(storage, nonce) {
-  const value = readVoice(storage)
-  writeVoice(storage, { ...value, results: value.results.filter((r) => r.nonce !== nonce) })
+export async function deleteVoiceResult(storage, nonce) {
+  return lockedWrite(() => {
+    const value = readVoice(storage)
+    writeVoice(storage, { ...value, results: value.results.filter((r) => r.nonce !== nonce) })
+  })
 }
 
 export function callReportUrl(result) {

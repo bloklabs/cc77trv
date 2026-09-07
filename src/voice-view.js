@@ -69,6 +69,7 @@ export function mountVoice(view, { notice = '', origin = OS3_ORIGINS[0] } = {}) 
   const form = view.querySelector('#voiceForm')
   const status = view.querySelector('#voiceStatus')
   let disposed = false
+  let launching = false
   const setStatus = (message) => { if (!disposed) status.textContent = message }
   const draft = () => ({ ...Object.fromEntries(new FormData(form)), ref: d.ref || 'voice' })
   const updateNetwork = () => {
@@ -79,21 +80,24 @@ export function mountVoice(view, { notice = '', origin = OS3_ORIGINS[0] } = {}) 
   updateNetwork()
   window.addEventListener('online', updateNetwork)
   window.addEventListener('offline', updateNetwork)
-  form.addEventListener('input', () => {
-    try { saveVoiceDraft(localStorage, draft()) } catch (e) { setStatus(e.message) }
+  form.addEventListener('input', async () => {
+    try { await saveVoiceDraft(localStorage, draft()) } catch (e) { setStatus(e.message) }
   })
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault()
+    if (launching) return
     try {
       if (!navigator.onLine) throw new Error('Connect to the internet to open OS3. Your draft is saved here.')
-      const url = beginVoice(localStorage, { ...draft(), mode: event.submitter?.value || 'speak' }, { origin })
-      window.location.assign(url)
+      launching = true
+      const url = await beginVoice(localStorage, { ...draft(), mode: event.submitter?.value || 'speak' }, { origin })
+      if (!disposed) window.location.assign(url)
     } catch (e) { setStatus(e.message) }
+    finally { launching = false }
   })
-  view.querySelector('#voiceImport').addEventListener('submit', (event) => {
+  view.querySelector('#voiceImport').addEventListener('submit', async (event) => {
     event.preventDefault()
     try {
-      importVoice(localStorage, new FormData(event.target).get('result'))
+      await importVoice(localStorage, new FormData(event.target).get('result'))
       view.querySelector('#voiceResults').innerHTML = readVoice(localStorage).results.map(resultHtml).join('')
       event.target.reset()
       setStatus('OS3 report saved on this device.')
@@ -101,13 +105,13 @@ export function mountVoice(view, { notice = '', origin = OS3_ORIGINS[0] } = {}) 
   })
   const stop = () => { globalThis.speechSynthesis?.cancel() }
   view.querySelector('#voiceStop').addEventListener('click', () => { stop(); setStatus('Playback stopped.') })
-  view.querySelector('#voiceResults').addEventListener('click', (event) => {
+  view.querySelector('#voiceResults').addEventListener('click', async (event) => {
     const play = event.target.closest('[data-voice-play]')
     const remove = event.target.closest('[data-voice-delete]')
     try {
       if (remove) {
         stop()
-        deleteVoiceResult(localStorage, remove.dataset.voiceDelete)
+        await deleteVoiceResult(localStorage, remove.dataset.voiceDelete)
         const results = readVoice(localStorage).results
         view.querySelector('#voiceResults').innerHTML = results.length ? results.map(resultHtml).join('') : '<p>No saved voice results.</p>'
         setStatus('Saved result deleted from this device.')

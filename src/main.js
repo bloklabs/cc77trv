@@ -60,7 +60,7 @@ async function boot() {
   // must not disappear while IndexedDB opens.
   wireChrome()
   try {
-    const returned = consumeVoiceFragment(localStorage, location, history)
+    const returned = await consumeVoiceFragment(localStorage, location, history)
     if (returned) { state.tab = 'voice'; voiceNotice = returned.message }
   } catch (e) { voiceNotice = e.message }
   if (state.tab === 'voice') render()
@@ -185,7 +185,7 @@ function wireCards() {
   $('#cards')?.addEventListener('click', onCardClick)
 }
 
-function onCardClick(e) {
+async function onCardClick(e) {
   if (e.target.closest('a')) return // links navigate natively (maps / source)
   const card = e.target.closest('.card')
   if (!card) return
@@ -197,7 +197,7 @@ function onCardClick(e) {
   else if (act === 'voice') {
     try {
       const { draft } = readVoice(localStorage)
-      saveVoiceDraft(localStorage, { ...draft, ref: item.id, restaurantName: item.title, city: item.city || '', phone: item.phone || '' })
+      await saveVoiceDraft(localStorage, { ...draft, ref: item.id, restaurantName: item.title, city: item.city || '', phone: item.phone || '' })
       setTab('voice')
     } catch (error) { toast(error.message) }
   }
