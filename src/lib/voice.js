@@ -160,7 +160,7 @@ export function validateVoiceResult(value) {
       },
       summary: text(c.summary, 4000, 'English summary', false),
       evidence: evidence.map((e) => {
-        if (!object(e) || !Number.isFinite(e.t) || e.t < 0) throw new Error('Check evidence timestamp.')
+        if (!object(e) || (e.t !== null && (!Number.isFinite(e.t) || e.t < 0))) throw new Error('Check evidence timestamp.')
         return { t: e.t, role: member(e.role, ['agent', 'user'], 'evidence speaker'), text: text(e.text, 2000, 'evidence quote') }
       }),
       endedAt: text(c.endedAt, 40, 'call end time', false),
@@ -171,7 +171,7 @@ export function validateVoiceResult(value) {
     }
     if (Number.isInteger(c.merchant.confirmedPartySize) && c.merchant.confirmedPartySize > 0) result.call.merchant.confirmedPartySize = c.merchant.confirmedPartySize
   }
-  if (value.truncated === true) result.truncated = true
+  if (value.truncated === true || (result.kind === 'call' && value.call.truncated === true)) result.truncated = true
   return result
 }
 

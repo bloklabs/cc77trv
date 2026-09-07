@@ -96,9 +96,14 @@ test('import, escaped text, device play/stop/replay and offline reload', async (
 test('call completion remains unconfirmed and includes merchant evidence', async ({ page }) => {
   await page.getByRole('tab', { name: 'Voice' }).click()
   await pending(page, 'call')
-  await importReport(page, envelope('call'))
+  const report = envelope('call')
+  report.call.evidence[0].t = null
+  report.call.truncated = true
+  await importReport(page, report)
   await expect(page.getByText('OS3 reported: reservation unconfirmed.', { exact: true })).toBeVisible()
   await expect(page.getByText('No puedo confirmar.', { exact: true })).toBeVisible()
+  await expect(page.getByText('Restaurant · Time unavailable', { exact: true })).toBeVisible()
+  await expect(page.getByText('OS3 shortened this report. Open OS3 for the full record.', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'View current call in OS3' })).toHaveAttribute('href', VOICE_DEFAULT_ORIGIN + '/#voice-call=call_browser_1')
   await expect(page.locator('.voice-result .voice-note').first()).toContainText('Call report from OS3 staging')
   await page.getByRole('button', { name: 'Delete this saved voice result' }).click()

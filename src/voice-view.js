@@ -26,7 +26,7 @@ function resultHtml(saved) {
       <p>Food availability: ${esc(words(c.merchant.availability))} · Call: ${esc(words(c.state))}${c.reconciling ? ' · Checking provider outcome' : ''}</p>
       ${c.merchant.confirmedLocalTime ? `<p>Reported time: ${esc(c.merchant.confirmedLocalTime)}${c.merchant.confirmedPartySize ? ` · Party of ${esc(c.merchant.confirmedPartySize)}` : ''}${c.merchant.confirmedName ? ` · ${esc(c.merchant.confirmedName)}` : ''}</p>` : ''}
       ${c.summary ? `<p>${esc(c.summary)}</p>` : ''}
-      ${c.evidence.map((e) => `<blockquote><span>${esc(e.role === 'user' ? 'Restaurant' : 'AI assistant')} · ${esc(e.t)}s</span><p>${esc(e.text)}</p></blockquote>`).join('')}
+      ${c.evidence.map((e) => `<blockquote><span>${esc(e.role === 'user' ? 'Restaurant' : 'AI assistant')} · ${e.t === null ? 'Time unavailable' : `${esc(e.t)}s`}</span><p>${esc(e.text)}</p></blockquote>`).join('')}
       <p class="voice-note">Saved report from OS3. Current availability has not been checked by Concierge.</p>
       ${href ? `<a class="chip voice-link" href="${esc(href)}" rel="noreferrer">View current call in OS3</a>` : ''}`
   }

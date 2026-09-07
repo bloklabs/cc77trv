@@ -120,6 +120,16 @@ describe('OS3 voice handoff', () => {
     expect(validateVoiceResult(value).call.state).toBe('cancel_requested')
   })
 
+  it('preserves quotes with explicitly unavailable timestamps and reports nested truncation', async () => {
+    const value = call(); value.call.evidence[0].t = null; value.call.truncated = true
+    const store = await ready('call')
+    const result = await importVoice(store, encodeVoice(value), { now })
+    expect(result.call.evidence[0]).toEqual({ role: 'user', t: null, text: 'No puedo confirmar.' })
+    expect(result.truncated).toBe(true)
+    delete value.call.evidence[0].t
+    expect(() => validateVoiceResult(value)).toThrow('timestamp')
+  })
+
   it('rejects unsafe or malformed result fields before consuming the nonce', async () => {
     const store = await ready('call')
     for (const mutate of [
