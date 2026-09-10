@@ -15,6 +15,10 @@ import { nominatimSuggest } from './lib/places.js'
 import { alertsToFire } from './lib/proximity.js'
 import { consumeVoiceFragment, readVoice, saveVoiceDraft } from './lib/voice.js'
 import { mountVoice } from './voice-view.js'
+import { MissionController } from './lib/mission-controller.js'
+import { MissionClient } from './lib/mission-client.js'
+import { buildKnownContext, isMissionPrompt } from './lib/mission-store.js'
+import { mountMissions } from './mission-view.js'
 
 // Bump when the info-gathering scripts improve — the background loop then
 // re-runs them on every saved entry so old items pick up the latest data.
@@ -53,12 +57,25 @@ const $ = (s, r = document) => r.querySelector(s)
 const view = $('#view')
 let voiceCleanup = null
 let voiceNotice = ''
+let missionCleanup = null
+const missions = new MissionController({
+  client: new MissionClient({ origin: import.meta.env.VITE_OS3_VOICE_ORIGIN || undefined }),
+  context: (previous) => {
+    let known = previous
+    try {
+      const legacy = readVoice(localStorage).draft
+      if (!known.locale && legacy.locale) known = { ...known, locale: legacy.locale }
+    } catch { /* An optional legacy report must not block a new mission. */ }
+    return buildKnownContext({ previous: known, items: state.items, city: state.filter.city, geo: state.geo, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+  },
+})
 
 // ---------- boot ----------
 async function boot() {
   // Wire visible navigation before asynchronous storage work: an early tap
   // must not disappear while IndexedDB opens.
   wireChrome()
+  missions.start()
   try {
     const returned = await consumeVoiceFragment(localStorage, location, history)
     if (returned) { state.tab = 'voice'; voiceNotice = returned.message }
@@ -102,12 +119,15 @@ function setTab(tab) {
 async function refresh() {
   state.items = await allItems()
   // Background research must not interrupt voice playback or a typed draft.
-  if (state.tab !== 'voice') render()
+  if (state.tab === 'list' && $('#missionResults')) renderCards()
+  else if (state.tab !== 'voice') render()
 }
 
 function render() {
   voiceCleanup?.()
   voiceCleanup = null
+  missionCleanup?.()
+  missionCleanup = null
   if (state.tab === 'list') renderList()
   else if (state.tab === 'map') renderMap()
   else if (state.tab === 'plan') renderPlan()
@@ -119,17 +139,21 @@ function render() {
 
 // ---------- LIST (landing = instant capture) ----------
 function renderList() {
+  missionCleanup?.()
+  missionCleanup = null
   const cities = ['all', ...uniqueCities(state.items)]
   const f = state.filter
   const filtered = applyFilters(state.items)
 
   view.innerHTML = `
-    <div class="capture">
-      <input class="capture-input" id="cap" enterkeyhint="done" autocomplete="off"
-        placeholder="Paste a link or type a place you love…" value="" />
+    <form class="capture mission-compose" id="conciergePrompt">
+      <input class="capture-input" id="cap" enterkeyhint="send" autocomplete="off" maxlength="4000"
+        aria-label="Ask Concierge or save a place" placeholder="Ask Concierge, paste a link, or save a place…" value="${esc(missions.state().journal?.draft || '')}" />
+      <button type="submit" class="chip mission-send">Send</button>
       <span class="capture-status" id="capStatus"></span>
       <div class="ac" id="acList" hidden></div>
-    </div>
+    </form>
+    <div id="missionResults"></div>
     <input class="search" id="q" placeholder="🔍 Filter…" value="${esc(f.q)}" />
     <div class="filters" id="domainFilters" aria-label="Research area">
       ${['all', ...DOMAINS].map((d) => filterPill('domain:' + d, f.domain === d, d === 'all' ? 'All research' : DOMAIN_META[d].emoji + ' ' + DOMAIN_META[d].label)).join('')}
@@ -144,19 +168,41 @@ function renderList() {
   `
 
   const cap = $('#cap')
+  const unmountMissions = mountMissions($('#missionResults'), missions)
+  let shownAccount = missions.state().identity?.accountId
+  const unsubscribeDraft = missions.subscribe(() => {
+    const latest = missions.state()
+    if (latest.identity?.accountId !== shownAccount) { shownAccount = latest.identity?.accountId; cap.value = latest.journal?.draft || '' }
+  })
+  missionCleanup = () => { unmountMissions(); unsubscribeDraft() }
   cap.focus()
+  const submitCapture = async (text) => {
+    hideAc()
+    try {
+      if (isMissionPrompt(text)) {
+        await missions.saveDraft(text)
+        await missions.submit(text)
+        if (cap.value === text) cap.value = ''
+      } else { cap.value = ''; await missions.saveDraft(''); await quickAdd(text) }
+    } catch (error) { missions.notice = error.message; missions.emit() }
+  }
+  $('#conciergePrompt').addEventListener('submit', (e) => { e.preventDefault(); if (cap.value.trim()) void submitCapture(cap.value) })
   cap.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && cap.value.trim()) { hideAc(); const v = cap.value; cap.value = ''; quickAdd(v) }
-    else if (e.key === 'Escape') hideAc()
+    if (e.key === 'Escape') hideAc()
   })
   cap.addEventListener('paste', (e) => {
     const text = (e.clipboardData || window.clipboardData).getData('text')
     // Auto-process a link, a multi-line dump, or an email of places.
-    if (text && (/https?:\/\//i.test(text) || /\r?\n/.test(text.trim()) || parseBulk(text).length > 1)) {
+    if (text && !isMissionPrompt(text) && (/https?:\/\//i.test(text) || /\r?\n/.test(text.trim()) || parseBulk(text).length > 1)) {
       e.preventDefault(); cap.value = ''; hideAc(); quickAdd(text)
+      void missions.saveDraft('').catch(() => {})
     }
   })
-  cap.addEventListener('input', () => onCaptureInput(cap.value))
+  cap.addEventListener('input', () => {
+    void missions.saveDraft(cap.value).catch(() => {})
+    if (isMissionPrompt(cap.value)) hideAc()
+    else onCaptureInput(cap.value)
+  })
   cap.addEventListener('blur', () => setTimeout(hideAc, 180)) // let a tap register first
 
   $('#q').addEventListener('input', (e) => { state.filter.q = e.target.value; renderCards() })
@@ -405,6 +451,7 @@ function hideAc() { const el = $('#acList'); if (el) { el.hidden = true; el.inne
 function pickSuggestion(s) {
   hideAc()
   const cap = $('#cap'); if (cap) cap.value = ''
+  void missions.saveDraft('').catch(() => {})
   // has coords → fully offline-capable save; still gathers extra detail if online
   quickAddOne({ title: s.title, city: s.city || undefined, lat: s.lat, lng: s.lng, category: s.category, domain: s.domain })
 }
@@ -461,6 +508,7 @@ function onPosition(pos) {
   const { latitude, longitude } = pos.coords
   state.geo.lat = latitude
   state.geo.lng = longitude
+  state.geo.observedAt = pos.timestamp || Date.now()
   const fires = alertsToFire(latitude, longitude, state.items, {
     now: Date.now(), radiusM: 100, cooldownMs: 60 * 60 * 1000, lastNotified: state.geo.notified,
   })
