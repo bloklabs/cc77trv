@@ -184,7 +184,12 @@ function renderList() {
         // Capture account/authority before the first storage-lock await.
         await missions.submit(text)
         if (missions.state().identity?.accountId === account && cap.value === text) cap.value = ''
-      } else { cap.value = ''; await missions.saveDraft(''); await quickAdd(text) }
+      } else {
+        cap.value = ''
+        // Optional mission-draft cleanup cannot block the existing place store.
+        void missions.saveDraft('').catch(() => {})
+        await quickAdd(text)
+      }
     } catch (error) { missions.notice = error.message; missions.emit() }
   }
   $('#conciergePrompt').addEventListener('submit', (e) => { e.preventDefault(); if (cap.value.trim()) void submitCapture(cap.value) })

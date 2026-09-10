@@ -168,6 +168,19 @@ test('storage refusal prevents any mission dispatch and preserves the typed prom
   expect(api.posts).toHaveLength(0)
 })
 
+test('ordinary place capture still works when mission storage is unavailable', async ({ page, context: browser }) => {
+  const api = await setup(page)
+  await browser.setOffline(true)
+  await page.evaluate((prefix) => {
+    const write = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key, value) { if (key.startsWith(prefix)) throw new DOMException('quota', 'QuotaExceededError'); return write.call(this, key, value) }
+  }, PREFIX)
+  await send(page, 'Hotel Kairo Review Fixture')
+  await expect(page.getByRole('heading', { name: 'Hotel Kairo Review Fixture' })).toBeVisible()
+  await expect(page.locator('[data-notice]')).toContainText('Could not save')
+  expect(api.posts).toHaveLength(0)
+})
+
 test('account switch during delayed create never displays account A result in account B', async ({ page }) => {
   const api = await setup(page)
   let release
