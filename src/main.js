@@ -180,9 +180,10 @@ function renderList() {
     hideAc()
     try {
       if (isMissionPrompt(text)) {
-        await missions.saveDraft(text)
+        const account = missions.state().identity?.accountId
+        // Capture account/authority before the first storage-lock await.
         await missions.submit(text)
-        if (cap.value === text) cap.value = ''
+        if (missions.state().identity?.accountId === account && cap.value === text) cap.value = ''
       } else { cap.value = ''; await missions.saveDraft(''); await quickAdd(text) }
     } catch (error) { missions.notice = error.message; missions.emit() }
   }

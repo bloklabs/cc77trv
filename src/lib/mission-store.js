@@ -57,9 +57,10 @@ export async function rememberIdentity(storage, identity) {
     return { draft: firstDraft, submission: submission?.accountId === identity.accountId ? submission : null }
   })
 }
-export async function stageSignInSubmission(storage, request) {
+export async function stageSignInSubmission(storage, request, expectedAccount = readIdentity(storage).accountId) {
   return locked(MISSION_META, () => {
     const old = readIdentity(storage)
+    if (old.accountId !== expectedAccount) throw new Error('The selected account changed before saving. Review the prompt in the account you want to use.')
     if (old.submission) {
       if (JSON.stringify(old.submission.request) !== JSON.stringify(request)) throw new Error('The earlier submitted request is still saved. Finish signing in for it first.')
       return old.submission
@@ -170,7 +171,7 @@ export async function settleIntent(storage, account, key, snapshot) {
 
 export function isMissionPrompt(text) {
   if (/^https?:\/\/\S+$/i.test(text.trim())) return false
-  return /[?？]/.test(text) || /\b(call|phone|book|reserve|reservation|find|ask|check|research|recommend|availability|available|sold out|burger|tonight|tomorrow|near me|dinner|lunch)\b/i.test(text)
+  return /[?？]/.test(text) || /\b(call|phone|ring|telephone|book|reserve|reservation|find|ask|check|research|recommend|availability|available|sold out|burger|tonight|tomorrow|near me|dinner|lunch)\b/i.test(text)
 }
 export function buildKnownContext({ previous = {}, items = [], city, geo, timezone } = {}) {
   const context = cleanContext(previous)
@@ -182,4 +183,9 @@ export function buildKnownContext({ previous = {}, items = [], city, geo, timezo
   const selected = items.filter((p) => (!city || city === 'all' || p.city === city) && (p.category === 'eat' || ['food', 'beverage', 'wine'].includes(p.domain)))
   context.savedPlaces = selected.slice(0, 20).map((p) => ({ id: p.id, name: p.title, city: p.city, sourceUrls: [...new Set([p.website, p.url, p.mapsUrl].filter((url) => /^https?:\/\//i.test(url || '')))], notes: p.notes || '' }))
   return cleanContext(context)
+}
+
+export function canCallYourself(mission) {
+  if (!['completed', 'canceled'].includes(mission.state)) return false
+  return mission.destinations.every((p) => (p.attempts || []).every((a) => a.call && ['completed', 'failed', 'canceled'].includes(a.call.state)))
 }

@@ -67,7 +67,11 @@ export class MissionController {
     const previous = identity.accountId ? readJournal(this.storage, identity.accountId).context : {}
     const request = missionRequest(prompt, this.context(previous))
     if (identity.accountId) await queueIntent(this.storage, identity.accountId, { kind: 'create', path: '/missions', body: request })
-    else await stageSignInSubmission(this.storage, request)
+    else await stageSignInSubmission(this.storage, request, identity.accountId)
+    if (readIdentity(this.storage).accountId !== identity.accountId) {
+      this.notice = 'Request saved for the account that submitted it. Switch back to that account to continue.'
+      this.emit(); return
+    }
     this.notice = this.online() ? 'Request saved. Concierge will work within your instructions.' : 'Saved on this device. Waiting for reconnect; no new call has been sent.'
     this.authWanted = true
     this.emit()
@@ -152,10 +156,14 @@ export class MissionController {
         let dispatchError = ''
         const work = async () => {
           // Stop intents take precedence; a stale answer must never starve a stop.
-          const pending = readJournal(this.storage, identity.accountId).pending
-            .filter((p) => !p.rejected).sort((a, b) => Number(b.kind === 'cancel') - Number(a.kind === 'cancel'))
-          for (const saved of pending) {
-            if (!current()) return
+          const visited = new Set()
+          while (current()) {
+            // Re-read after every response: a stop can arrive during any await.
+            const saved = readJournal(this.storage, identity.accountId).pending
+              .filter((p) => !p.rejected && !visited.has(p.key))
+              .sort((a, b) => Number(b.kind === 'cancel') - Number(a.kind === 'cancel'))[0]
+            if (!saved) return
+            visited.add(saved.key)
             const intent = await markAttempted(this.storage, identity.accountId, saved.key)
             if (!intent || !current()) continue
             try {
@@ -165,7 +173,7 @@ export class MissionController {
               if (current()) { this.notice = dispatchError; this.emit() }
             } catch (error) {
               if (error.status === 401) throw error
-              if ([400, 409].includes(error.status)) await changeJournal(this.storage, identity.accountId, (j) => {
+              if ([400, 409, 410].includes(error.status)) await changeJournal(this.storage, identity.accountId, (j) => {
                 const item = j.pending.find((p) => p.key === intent.key)
                 if (item) item.rejected = error.status
               })

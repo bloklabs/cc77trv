@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { MissionClient } from '../src/lib/mission-client.js'
 import { MissionController } from '../src/lib/mission-controller.js'
-import { MISSION_META, missionKey, readIdentity, readJournal, rememberIdentity, saveMissionDraft, missionRequest, queueIntent, markAttempted, settleIntent, saveSnapshots, stageSignInSubmission, clearSignInSubmission, publicMission, buildKnownContext, isMissionPrompt } from '../src/lib/mission-store.js'
+import { MISSION_META, missionKey, readIdentity, readJournal, rememberIdentity, saveMissionDraft, missionRequest, queueIntent, markAttempted, settleIntent, saveSnapshots, stageSignInSubmission, clearSignInSubmission, publicMission, buildKnownContext, isMissionPrompt, canCallYourself } from '../src/lib/mission-store.js'
 
 function storage() {
   const values = new Map()
@@ -35,7 +35,7 @@ describe('mission journal and exact authority', () => {
     expect(buildKnownContext({ geo: { ...geo, observedAt: 0 } }).location).toBeUndefined()
     expect(buildKnownContext({ geo, city: 'Paris' }).location).toEqual({ city: 'Paris' })
   })
-  it.each(['Call the restaurants', 'Any vegetarian food near me?', 'Book for four tonight', 'Find a table for tonight'])('routes a normal request to missions: %s', (s) => expect(isMissionPrompt(s)).toBe(true))
+  it.each(['Call the restaurants', 'Any vegetarian food near me?', 'Book for four tonight', 'Find a table for tonight', 'Ring BAR DESY', 'Telephone the restaurant'])('routes a normal request to missions: %s', (s) => expect(isMissionPrompt(s)).toBe(true))
   it.each(['https://restaurant.example/menu', 'Musée d’Orsay', 'Hotel Maria Cristina'])('preserves place capture: %s', (s) => expect(isMissionPrompt(s)).toBe(false))
   it('bounds the prompt/context and strips privileged top-level fields', () => {
     expect(() => missionRequest('x'.repeat(4001))).toThrow('4,000')
@@ -170,6 +170,46 @@ describe('mission-only authentication and recovery', () => {
     c.online = () => false
     await c.answer({ ...m, revision: 7 }, m.needs[0], 'Jay Smith')
     expect(readJournal(s, 'accountA').pending).toHaveLength(2)
+  })
+  it('retains 410 tombstones without repeating the expired create or blocking an explicit new request', async () => {
+    const s = storage(); await rememberIdentity(s, { accountId: 'accountA' })
+    const old = await queueIntent(s, 'accountA', { kind: 'create', path: '/missions', body: request() })
+    const api = vi.fn(async (path, options) => {
+      if (options) throw Object.assign(new Error('Mission expired'), { status: 410 })
+      return path === '/missions' ? { missions: [] } : {}
+    })
+    const c = new MissionController({ storage: s, client: { identity: { accountId: 'accountA' }, request: api }, online: () => true })
+    await c.sync(); await c.sync()
+    expect(api.mock.calls.filter(([, options]) => options)).toHaveLength(1)
+    expect(readJournal(s, 'accountA').pending[0]).toMatchObject({ key: old.key, rejected: 410 })
+    c.online = () => false; await c.submit('Find dinner for tomorrow')
+    const pending = readJournal(s, 'accountA').pending
+    expect(pending).toHaveLength(2); expect(pending[1].key).not.toBe(old.key)
+  })
+  it('dispatches a newly queued stop before another answer when it arrives during an active response', async () => {
+    const s = storage(); await rememberIdentity(s, { accountId: 'accountA' })
+    const m = mission({ state: 'needs_input' }); const calls = []
+    let release
+    const hold = new Promise((resolve) => { release = resolve })
+    const client = { identity: { accountId: 'accountA' }, request: async (path, options) => {
+      calls.push(path)
+      if (options?.body.questionId === 'q1') await hold
+      return options ? { mission: m } : path === '/missions' ? { missions: [] } : {}
+    } }
+    const c = new MissionController({ storage: s, client, online: () => false })
+    await c.answer(m, { id: 'q1' }, 'First'); await c.answer(m, { id: 'q2' }, 'Second')
+    c.online = () => true; const running = c.sync()
+    await vi.waitFor(() => expect(calls).toHaveLength(1))
+    await c.cancel(m); release(); await running
+    expect(calls.slice(0, 3)).toEqual(['/missions/mission_test/answers', '/missions/mission_test/cancel', '/missions/mission_test/answers'])
+  })
+  it('unlocks self-dial only with terminal mission and known terminated calls', () => {
+    const withCall = (state, call) => ({ state, destinations: [{ attempts: [{ call }] }] })
+    expect(canCallYourself(withCall('canceling', { state: 'canceled' }))).toBe(false)
+    expect(canCallYourself(withCall('canceled', { state: 'connected' }))).toBe(false)
+    expect(canCallYourself(withCall('canceled', { state: 'outcome_unknown' }))).toBe(false)
+    expect(canCallYourself(withCall('canceled', null))).toBe(false)
+    expect(canCallYourself(withCall('canceled', { state: 'canceled' }))).toBe(true)
   })
   it('never uses account B authentication to send account A pending work', async () => {
     const s = storage(); await rememberIdentity(s, { accountId: 'accountA' })

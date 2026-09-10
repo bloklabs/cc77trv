@@ -95,6 +95,8 @@ test('one normal prompt reuses location/preferences, signs in with nonce, discov
 test('anonymous submission survives reload before sign-in without sending typed-but-unsubmitted drafts', async ({ page }) => {
   const api = await setup(page, { anonymous: true })
   await send(page, 'Call three vegetarian restaurants in San Sebastián in Spanish and report back.')
+  // Reload after the user-visible durable acknowledgement, before Google sign-in.
+  await expect(page.locator('[data-pending]')).toContainText('Saved on this device')
   await page.reload()
   await signIn(page)
   await expect(page.locator('[data-mission]')).toHaveCount(1)
@@ -136,6 +138,7 @@ test('staff answer keeps focus across status refresh; offline stop preserves par
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
   await browser.setOffline(true)
   await page.getByRole('button', { name: 'Stop this request' }).click()
+  await expect(page.locator('[data-local]')).toContainText('Stop saved on this device')
   expect(api.cancellations).toBe(0)
   await page.reload()
   await expect(page.locator('[data-network]')).toContainText('Offline')
@@ -146,6 +149,11 @@ test('staff answer keeps focus across status refresh; offline stop preserves par
   await browser.setOffline(false); await signIn(page)
   await expect(page.getByText('Stop requested — awaiting confirmation', { exact: true })).toBeVisible()
   expect(api.cancellations).toBe(1); expect(api.posts).toHaveLength(1)
+  await expect(page.locator('[data-takeover] a[href^="tel:"]')).toHaveCount(0)
+  api.current = { ...api.current, revision: api.current.revision + 1, state: 'canceled' }
+  api.current.destinations[0].attempts[0].call.state = 'canceled'
+  await page.getByRole('button', { name: 'Refresh results' }).click()
+  await expect(page.getByRole('link', { name: 'Call Desy yourself' })).toHaveAttribute('href', 'tel:+34943000000')
 })
 
 test('storage refusal prevents any mission dispatch and preserves the typed prompt', async ({ page }) => {
@@ -195,4 +203,27 @@ test('concurrent phone tabs dispatch one saved mission under a browser lock', as
   await expect(page.locator('[data-mission]')).toHaveCount(1)
   await expect(second.locator('[data-mission]')).toHaveCount(1)
   expect(a.posts.length + b.posts.length).toBe(1)
+})
+
+test('normal prompt keeps its original account while waiting for a cross-tab storage lock', async ({ page, context: browser }) => {
+  const api = await setup(page)
+  await page.evaluate((key) => {
+    const held = new Promise((resolve) => { window.__releaseJournal = resolve })
+    void navigator.locks.request(key, async () => { window.__journalLocked = true; await held })
+  }, PREFIX + 'accountA')
+  await expect.poll(() => page.evaluate(() => !!window.__journalLocked)).toBe(true)
+  const second = await browser.newPage()
+  await second.goto('./')
+  try {
+    await send(page)
+    await second.evaluate(({ META, PREFIX }) => {
+      localStorage.setItem(PREFIX + 'accountB', JSON.stringify({ v: 1, draft: 'B private draft', context: {}, contextAt: 0, missions: [], pending: [], replies: {} }))
+      localStorage.setItem(META, JSON.stringify({ accountId: 'accountB', label: 'b@example.test', draft: '' }))
+    }, { META, PREFIX })
+    await expect(page.locator('[data-account]')).toContainText('b@example.test')
+  } finally { await page.evaluate(() => window.__releaseJournal()) }
+  await expect.poll(() => page.evaluate((key) => JSON.parse(localStorage.getItem(key)).pending.length, PREFIX + 'accountA')).toBe(1)
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).pending.length, PREFIX + 'accountB')).toBe(0)
+  await expect(page.getByLabel('Ask Concierge or save a place')).toHaveValue('B private draft')
+  expect(api.posts).toHaveLength(0)
 })

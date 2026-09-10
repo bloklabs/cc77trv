@@ -2,7 +2,7 @@ import { os3Origin } from './voice.js'
 
 export class MissionApiError extends Error {
   constructor(status, kind) {
-    super(status === 401 ? 'Sign in to update this request.' : status === 403 ? 'This account or site cannot access that request.' : status === 409 ? 'OS3 has a newer or different request. Your saved instructions are kept.' : status === 0 ? 'Connection interrupted. Your exact request is saved for reconnect.' : status === 503 ? 'OS3 mission service is not configured yet. Your request is saved.' : 'OS3 could not finish this update. Your saved request is kept.')
+    super(status === 401 ? 'Sign in to update this request.' : status === 403 ? 'This account or site cannot access that request.' : status === 410 ? 'This older mission has expired on OS3. Its saved instructions and outcomes remain here; a new request needs a new submission.' : status === 409 ? 'OS3 has a newer or different request. Your saved instructions are kept.' : status === 0 ? 'Connection interrupted. Your exact request is saved for reconnect.' : status === 503 ? 'OS3 mission service is not configured yet. Your request is saved.' : 'OS3 could not finish this update. Your saved request is kept.')
     this.status = status
     this.kind = kind
   }

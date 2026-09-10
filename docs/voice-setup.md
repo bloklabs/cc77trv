@@ -83,6 +83,8 @@ rollout instructions live in the
 4. Use **Stop this request** to stop further work. While offline, the stop intent
    is saved locally and explicitly awaits delivery; an accepted mission can
    still be running. Reconnect restores the exact pending request and key.
+   To take over, stop the request, then use the sourced phone link once OS3
+   confirms termination. This starts your own call; it is not live transfer.
 
 Ordinary place names, pasted links and autocomplete selections still save places.
 The **Voice** tab retains manual in-person speech tools and earlier imported

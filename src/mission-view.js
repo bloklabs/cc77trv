@@ -1,4 +1,4 @@
-import { terminalMission } from './lib/mission-store.js'
+import { terminalMission, canCallYourself } from './lib/mission-store.js'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const labels = { queued: 'Queued', dialing: 'Dialing — no answer confirmed yet', speaking: 'Speaking with the restaurant', waiting: 'Waiting for evidence', needs_input: 'Needs your answer', completed: 'Work completed', failed: 'Could not finish', canceling: 'Stop requested — awaiting confirmation', canceled: 'Stopped' }
@@ -64,7 +64,7 @@ export function mountMissions(root, controller) {
         if (!entry) {
           const node = document.createElement('article')
           node.className = 'mission-card'; node.dataset.mission = m.id
-          node.innerHTML = '<p class="mission-prompt" data-prompt></p><p><strong data-state></strong></p><p class="mission-note" data-updated></p><div data-outcome></div><div data-questions></div><div data-local></div><button class="chip" data-cancel>Stop this request</button><details data-history><summary>Earlier updates</summary><div></div></details>'
+          node.innerHTML = '<p class="mission-prompt" data-prompt></p><p><strong data-state></strong></p><p class="mission-note" data-updated></p><div data-outcome></div><div data-questions></div><div data-local></div><button class="chip" data-cancel>Stop this request</button><div data-takeover></div><details data-history><summary>Earlier updates</summary><div></div></details>'
           root.querySelector('[data-results]').append(node)
           entry = { node, revision: 0, question: null, account: identity.accountId }; cards.set(m.id, entry)
         }
@@ -82,6 +82,9 @@ export function mountMissions(root, controller) {
         const pending = journal.pending.filter((p) => p.subject === m.id || p.subject.startsWith(m.id + '/'))
         node.querySelector('[data-local]').textContent = pending.map((p) => p.rejected ? 'OS3 could not accept an earlier update. Its original instructions remain saved; review the latest question or result.' : p.kind === 'cancel' ? 'Stop saved on this device; awaiting delivery and confirmation. The mission may still be running.' : 'Your answer is saved; awaiting delivery and confirmation.').join(' ')
         node.querySelector('[data-cancel]').hidden = terminalMission(m) || m.state === 'canceling' || pending.some((p) => p.kind === 'cancel' && !p.rejected)
+        const phones = m.destinations.filter((p) => /^\+[1-9]\d{6,14}$/.test(p.phone || '') && sourceLink(p.source))
+        const ready = canCallYourself(m) && !pending.some((p) => p.kind === 'cancel' && !p.rejected)
+        node.querySelector('[data-takeover]').innerHTML = phones.length ? '<p class="mission-note">' + (ready ? 'AI work has ended. You can call the restaurant yourself.' : 'To take over, stop this request. Phone links unlock after confirmed termination; this is not a live transfer.') + '</p>' + phones.map((p) => ready ? '<p><a href="tel:' + esc(p.phone) + '">Call ' + esc(p.name) + ' yourself · ' + esc(p.phone) + '</a></p>' : '<p>Call ' + esc(p.name) + ' yourself · ' + esc(p.phone) + ' · awaiting termination</p>').join('') : ''
         const q = m.needs?.[0]
         const questionKey = q ? q.id : null
         if (entry.question !== questionKey) {
