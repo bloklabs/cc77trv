@@ -118,6 +118,20 @@ describe('mission-only authentication and recovery', () => {
     await expect(client.request('/v1/voice/calls')).rejects.toThrow('Unsupported')
     client.forget(); await expect(client.request('/missions')).rejects.toMatchObject({ status: 401 })
   })
+  it.each(['explicit stop', 'deadline'])('ends a slow read on %s even with a caller signal', async (reason) => {
+    const deadline = new AbortController(); const caller = new AbortController()
+    const clock = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal)
+    try {
+      const client = new MissionClient({ fetcher: async (url, init) => {
+        if (url.endsWith('/exchange')) return Response.json({ accessToken: 'PRIVATE', accountId: 'accountA', expiresAt: Date.now() / 1000 + 600, scope: 'concierge:missions' })
+        return new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }))
+      } })
+      await client.exchange('challenge', 'google')
+      const reading = client.request('/missions', { signal: caller.signal })
+      ;(reason === 'deadline' ? deadline : caller).abort()
+      await expect(reading).rejects.toMatchObject({ status: 0 })
+    } finally { clock.mockRestore() }
+  })
   it('rejects wrong scope and a delayed sign-in callback cannot replace a new session', async () => {
     const token = { accessToken: 'PRIVATE', accountId: 'accountA', expiresAt: Date.now() / 1000 + 600, scope: 'concierge:missions' }
     const client = new MissionClient({ fetcher: async () => Response.json(token) })
@@ -128,7 +142,7 @@ describe('mission-only authentication and recovery', () => {
     const s = storage(); await rememberIdentity(s, { accountId: 'accountA' })
     const keys = []; let accepted = false
     const makeClient = () => ({ identity: { accountId: 'accountA' }, request: async (path, options) => {
-      if (path === '/missions' && options) { keys.push(options.key); if (!accepted) { accepted = true; throw new Error('Connection lost') } return { mission: mission() } }
+      if (path === '/missions' && options?.body) { keys.push(options.key); if (!accepted) { accepted = true; throw new Error('Connection lost') } return { mission: mission() } }
       return path === '/missions' ? { missions: [mission()] } : {}
     } })
     const first = new MissionController({ storage: s, client: makeClient(), context: () => request().context, online: () => true })
@@ -175,12 +189,12 @@ describe('mission-only authentication and recovery', () => {
     const s = storage(); await rememberIdentity(s, { accountId: 'accountA' })
     const old = await queueIntent(s, 'accountA', { kind: 'create', path: '/missions', body: request() })
     const api = vi.fn(async (path, options) => {
-      if (options) throw Object.assign(new Error('Mission expired'), { status: 410 })
+      if (options?.body) throw Object.assign(new Error('Mission expired'), { status: 410 })
       return path === '/missions' ? { missions: [] } : {}
     })
     const c = new MissionController({ storage: s, client: { identity: { accountId: 'accountA' }, request: api }, online: () => true })
     await c.sync(); await c.sync()
-    expect(api.mock.calls.filter(([, options]) => options)).toHaveLength(1)
+    expect(api.mock.calls.filter(([, options]) => options?.body)).toHaveLength(1)
     expect(readJournal(s, 'accountA').pending[0]).toMatchObject({ key: old.key, rejected: 410 })
     c.online = () => false; await c.submit('Find dinner for tomorrow')
     const pending = readJournal(s, 'accountA').pending
@@ -193,8 +207,8 @@ describe('mission-only authentication and recovery', () => {
     const hold = new Promise((resolve) => { release = resolve })
     const client = { identity: { accountId: 'accountA' }, request: async (path, options) => {
       calls.push(path)
-      if (options?.body.questionId === 'q1') await hold
-      return options ? { mission: m } : path === '/missions' ? { missions: [] } : {}
+      if (options?.body?.questionId === 'q1') await hold
+      return options?.body ? { mission: m } : path === '/missions' ? { missions: [] } : {}
     } }
     const c = new MissionController({ storage: s, client, online: () => false })
     await c.answer(m, { id: 'q1' }, 'First'); await c.answer(m, { id: 'q2' }, 'Second')
@@ -202,6 +216,30 @@ describe('mission-only authentication and recovery', () => {
     await vi.waitFor(() => expect(calls).toHaveLength(1))
     await c.cancel(m); release(); await running
     expect(calls.slice(0, 3)).toEqual(['/missions/mission_test/answers', '/missions/mission_test/cancel', '/missions/mission_test/answers'])
+  })
+  it.each(['/missions', '/config'])('dispatches a stop without waiting for slow read %s', async (slowPath) => {
+    const s = storage(); await rememberIdentity(s, { accountId: 'accountA' })
+    const m = mission({ state: 'speaking' }); await saveSnapshots(s, 'accountA', [m])
+    const calls = []; let reading = false; let aborted = false
+    const client = { identity: { accountId: 'accountA' }, request: async (path, options = {}) => {
+      calls.push(path)
+      if (path === slowPath && !reading) {
+        reading = true
+        return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+          aborted = true; reject(new Error('Read aborted'))
+        }, { once: true }))
+      }
+      return options.body ? { mission: { ...m, revision: 2, state: 'canceling' } } : path === '/missions' ? { missions: [m] } : {}
+    } }
+    const c = new MissionController({ storage: s, client, online: () => true })
+    const started = c.sync()
+    await vi.waitFor(() => expect(reading).toBe(true))
+    await c.cancel(m)
+    await vi.waitFor(() => expect(calls).toContain('/missions/mission_test/cancel'))
+    await started; await c.syncFlight
+    expect(aborted).toBe(true)
+    expect(readJournal(s, 'accountA').pending).toHaveLength(0)
+    expect(c.notice).not.toContain('Read aborted')
   })
   it('unlocks self-dial only with terminal mission and known terminated calls', () => {
     const withCall = (state, call) => ({ state, destinations: [{ attempts: [{ call }] }] })

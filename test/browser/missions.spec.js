@@ -113,7 +113,8 @@ test('lost create response and reload retry the exact key and prompt', async ({ 
   await expect(page.locator('[data-notice]')).toContainText('Connection interrupted')
   await page.reload(); await signIn(page)
   await expect(page.locator('[data-mission]')).toHaveCount(1)
-  expect(api.posts).toHaveLength(2)
+  // A cached outcome can render before reconnect has reconciled the mutation.
+  await expect.poll(() => api.posts.length).toBe(2)
   expect(api.posts[0]).toEqual(api.posts[1])
 })
 

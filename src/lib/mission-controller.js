@@ -21,6 +21,8 @@ export class MissionController {
     this.authRetryAt = 0
     this.challenge = null
     this.syncFlight = null
+    this.syncRequested = false
+    this.readAbort = null
     this.config = null
     this.timer = null
     this.signInHost = null
@@ -75,7 +77,7 @@ export class MissionController {
     this.notice = this.online() ? 'Request saved. Concierge will work within your instructions.' : 'Saved on this device. Waiting for reconnect; no new call has been sent.'
     this.authWanted = true
     this.emit()
-    void this.sync()
+    this.requestSync()
   }
   async acceptIdentity(identity) {
     const transfer = await rememberIdentity(this.storage, identity)
@@ -126,7 +128,7 @@ export class MissionController {
     if (!account || !answer.trim() || answer.length > 2000) throw new Error('Enter an answer of up to 2,000 characters.')
     await queueIntent(this.storage, account, { kind: 'answer', subject: mission.id + '/' + question.id, path: '/missions/' + mission.id + '/answers', body: { questionId: question.id, expectedRevision: mission.revision, answer } })
     this.notice = this.online() ? 'Answer saved for this question.' : 'Answer saved on this device; waiting to reconnect.'
-    this.authWanted = true; this.emit(); void this.sync()
+    this.authWanted = true; this.emit(); this.requestSync()
   }
   async saveReply(missionId, questionId, text) {
     const account = readIdentity(this.storage).accountId
@@ -137,13 +139,21 @@ export class MissionController {
     const account = readIdentity(this.storage).accountId
     await queueIntent(this.storage, account, { kind: 'cancel', subject: mission.id, path: '/missions/' + mission.id + '/cancel', body: {} })
     this.notice = this.online() ? 'Stop requested. Awaiting OS3 and carrier confirmation.' : 'Stop requested on this device. Reconnect to send it; the existing mission may still be running.'
-    this.authWanted = true; this.emit(); void this.sync()
+    this.authWanted = true; this.emit(); this.requestSync()
+  }
+  requestSync() {
+    this.syncRequested = true
+    // Reading status must not hold an explicitly requested stop behind it.
+    // Never abort a mutation: its outcome could already be accepted by OS3.
+    this.readAbort?.abort()
+    void this.sync()
   }
   async sync() {
     if (this.syncFlight || !this.online()) return this.syncFlight
     const identity = this.client.identity
     if (!identity) { this.emit(); return }
     if (readIdentity(this.storage).accountId !== identity.accountId) return
+    this.syncRequested = false
     const version = this.authVersion
     const current = () => this.authVersion === version && this.client.identity?.accountId === identity.accountId
     this.syncFlight = (async () => {
@@ -185,19 +195,24 @@ export class MissionController {
         if (!navigator.locks?.request) throw new Error('Cross-tab request locking is unavailable. Saved requests are kept.')
         await navigator.locks.request(MISSION_PREFIX + identity.accountId + '.dispatch', { ifAvailable: true }, (lock) => lock ? work() : undefined)
         if (!current()) return
-        const results = await this.client.request('/missions')
+        this.readAbort = new AbortController()
+        const results = await this.client.request('/missions', { signal: this.readAbort.signal })
         if (!Array.isArray(results.missions)) throw new Error('OS3 returned unreadable results. Saved outcomes are kept.')
         await saveSnapshots(this.storage, identity.accountId, results.missions)
         if (!current()) return
-        if (!this.config) this.config = await this.client.request('/config')
+        if (!this.config) this.config = await this.client.request('/config', { signal: this.readAbort.signal })
         this.emit()
       } catch (error) {
-        if (!current()) return
+        if (!current() || this.readAbort?.signal.aborted) return
         if (error.status === 401) { this.client.forget(); this.challenge = null; this.authWanted = true }
         this.notice = error.message
         this.emit()
       }
-    })().finally(() => { this.syncFlight = null; if (this.authVersion !== version && this.client.identity) void this.sync() })
+    })().finally(() => {
+      this.readAbort = null
+      this.syncFlight = null
+      if ((this.syncRequested || this.authVersion !== version) && this.client.identity) void this.sync()
+    })
     return this.syncFlight
   }
   tick() {

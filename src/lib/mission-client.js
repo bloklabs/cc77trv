@@ -28,7 +28,7 @@ export class MissionClient {
     try {
       response = await this.fetcher(this.origin + '/v1/concierge' + path, {
         method: body === undefined ? 'GET' : 'POST', credentials: 'omit', cache: 'no-store',
-        redirect: 'error', signal: signal || AbortSignal.timeout(25000),
+        redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25000)]) : AbortSignal.timeout(25000),
         headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
           ...(anonymous ? {} : { Authorization: 'Bearer ' + session.accessToken, 'X-OS3-Account': session.accountId }),
           ...(key ? { 'Idempotency-Key': key } : {}) },
