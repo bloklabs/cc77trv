@@ -1,9 +1,10 @@
 # Set up restaurant voice
 
 **First voice release: [OS3 staging](https://staging.os.unitary.com).**
-Concierge labels this destination before you leave. Configure and test the
-staging service first; production voice needs a separate reviewed OS3 promotion
-and deployment. Existing saved reports keep their original OS3 destination.
+The normal Concierge prompt talks directly to the staging mission service.
+Configure and test staging first; production needs a separate reviewed OS3
+promotion and deployment. Existing manual voice reports keep their original
+OS3 destination.
 
 **You pay the providers directly.** Concierge never asks you to paste an API
 key. The keys belong in the OS3 server's private environment configuration.
@@ -60,24 +61,41 @@ rollout instructions live in the
   Billing alerts are useful, but are not a substitute for enforced app limits.
 - Configure Twilio hangup credentials. Calls stay disabled without cancellation.
 - Test through the existing staging deployment before enabling production.
+- On the existing Google OAuth web client, verify **Authorized JavaScript
+  origins** includes `https://bloklabs.github.io`. Keep that exact origin in
+  OS3's allowed Concierge origins, derived from `VOICE_HANDOFF_TARGETS`. The
+  public client ID is not a secret. No Google client secret belongs in Pages.
+  The server issues a single-use nonce challenge and a ten-minute bearer usable
+  only for Concierge missions; the browser keeps credentials only in memory.
+  [Google setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
 
 ## Use it on your phone
 
-1. In Concierge, tap **Voice**, or the speech icon on a saved place.
-2. Enter your request in English and choose the staff's language. Do not assume
-   every restaurant in a city prefers the same language.
-3. Tap **Speak in OS3** or **Call in OS3**. Sign in normally to OS3 if needed.
-4. For speech, compose, check the English meaning, then play. Use Listen/Stop
-   for a staff reply. For a call, review the number, exact local date/time,
-   timezone, party size and booking name before dialing.
-5. Use **Send to Concierge** to save the phrase/report. If the browser or
-   installed app does not share the original request, copy the result and paste
-   it into **Import a result copied from OS3** in the original Concierge app.
-   Return within 24 hours.
+1. Type your request into the **normal Concierge prompt**, then send it. For
+   example: “Call three nearby restaurants, check vegetarian dinner for four at
+   20:15 tonight, and report back.” Known location, preferences and saved source
+   references accompany the request; include missing details naturally in text.
+2. Sign in with Google when needed. Your submitted request is kept while you
+   sign in and resumes automatically. Never copy an API key or sign-in token.
+3. Watch sourced destinations, call progress and results **in the same page**.
+   Answer a consequential missing question inline. There is no second mission
+   confirmation or mandatory phone-number/language form.
+4. Use **Stop this request** to stop further work. While offline, the stop intent
+   is saved locally and explicitly awaits delivery; an accepted mission can
+   still be running. Reconnect restores the exact pending request and key.
+   To take over, stop the request, then use the sourced phone link once OS3
+   confirms termination. This starts your own call; it is not live transfer.
+
+Ordinary place names, pasted links and autocomplete selections still save places.
+The **Voice** tab retains manual in-person speech tools and earlier imported
+reports. Those tools can still open OS3 and return a phrase/report, but they are
+optional and are not the restaurant-mission entry point.
 
 Saved results stay readable offline. Concierge labels call outcomes
 **OS3 reported** with time and evidence; an ended call does not establish that
-food remains or a table was booked. Open the call in OS3 for the current record.
+food remains or a table was booked. Missions refresh their current records while
+connected; offline snapshots keep the last known state, evidence and earlier
+updates. Google sign-in and real paid calls are not established by fixture tests.
 
 ## First paid test
 

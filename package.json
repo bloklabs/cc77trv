@@ -11,7 +11,7 @@
     "xray": "node scripts/xray-staging.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "node --check src/main.js && node --check src/lib/compat.js && node --check src/lib/normalize.js && node --check src/lib/store.js && node --check src/lib/sync.js && node --check src/lib/itinerary.js && node --check scripts/xray-staging.mjs && node --check vite.config.js && node --check src/lib/voice.js && node --check src/voice-view.js",
+    "lint": "node --check src/main.js && node --check src/lib/compat.js && node --check src/lib/normalize.js && node --check src/lib/store.js && node --check src/lib/sync.js && node --check src/lib/itinerary.js && node --check scripts/xray-staging.mjs && node --check vite.config.js && node --check src/lib/voice.js && node --check src/voice-view.js && node --check src/lib/mission-store.js && node --check src/lib/mission-client.js && node --check src/lib/mission-controller.js && node --check src/mission-view.js",
     "test:browser": "playwright test"
   },
   "dependencies": {

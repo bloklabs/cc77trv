@@ -22,11 +22,14 @@ latest list on-device and remains useful without a connection.
   transit and cost, and surface reservation lead times.
 - **Concierge handoff.** Copy one item or a complete day as structured text for
   a human or agent concierge.
-- **Restaurant voice.** Launch authenticated OS3 speech or restaurant calls with
-  your place details. Import phrases and call reports for offline reading;
-  device speech is a labelled fallback. The first voice release opens
-  [OS3 staging](https://staging.os.unitary.com), visibly labelled in Concierge.
-  See [voice account setup](docs/voice-setup.md).
+- **Concierge missions.** Use the normal prompt to request sourced restaurant
+  research and bounded calls. Known context accompanies the request; Google
+  sign-in gives this client mission-only access to [OS3 staging](https://staging.os.unitary.com).
+  Progress, staff questions, cancellation and sourced answers stay inline.
+  Exact pending requests and partial outcomes survive offline reloads.
+- **Saved voice tools.** Earlier reports and optional manual in-person speech
+  remain in Voice. Device speech is a labelled fallback. See
+  [account setup and phone instructions](docs/voice-setup.md).
 - **Private shared spaces.** The original end-to-end encrypted shared-list
   protocol remains supported. The sync host sees ciphertext only.
 
@@ -49,9 +52,12 @@ rename them as part of future branding work.
 
 ## Architecture
 
-Static Vite PWA. Research needs no application server or API key. Paid voice
-opens the authenticated OS3 app; provider keys stay on its server. The voice
-handoff uses bounded, one-use URL fragments and a separate local-only store.
+Static Vite PWA. Place capture and public enrichment work without sign-in.
+The normal prompt uses OS3's durable mission service with a short-lived,
+origin-bound, memory-only bearer after Google sign-in. Provider keys stay on OS3.
+Account-scoped journals retain exact mutation intents and sourced outcomes.
+Existing manual voice fragments and the encrypted shared-list store remain
+separate and compatible.
 
 | Concern | Implementation |
 | --- | --- |
@@ -61,6 +67,9 @@ handoff uses bounded, one-use URL fragments and a separate local-only store.
 | Enrichment | `src/lib/enrich.js` and `src/lib/gather.js` |
 | Geo, transit, and itinerary | `src/lib/geo.js`, `src/lib/transit.js`, `src/lib/itinerary.js` |
 | UI and map | `src/main.js`, Leaflet, OpenStreetMap |
+| Normal-prompt missions and inline results | `src/lib/mission-controller.js`, `src/mission-view.js` |
+| Mission-only sign-in/API | `src/lib/mission-client.js` |
+| Durable account journal | `src/lib/mission-store.js` |
 | Compatibility contract | `src/lib/compat.js` |
 
 ## Develop
@@ -103,3 +112,4 @@ every pull request and push to `main`. A green `main` deploys GitHub Pages.
 The voice design was agreed by Fable 5.1 and Astra before implementation.
 See the [original spec](docs/specs/restaurant-voice.md) and
 [agreed OS3 design](https://github.com/unitary-internal/unitary-os3/blob/staging/docs/specs/restaurant-voice-design.md).
+The normal-prompt replacement follows the [standalone mission contract](docs/specs/standalone-missions.md).
