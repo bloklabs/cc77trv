@@ -17,7 +17,7 @@ function locks() {
     return next
   } }
 }
-const request = () => missionRequest('Call three restaurants near me and report vegetarian options.', { location: { city: 'San Sebastián' }, locale: 'es-ES', preferences: { diet: 'vegetarian' } })
+const request = () => missionRequest('Call three restaurants near me and report vegetarian options.', { location: { city: 'San Sebastián' }, locale: 'es-ES', preferences: { diet: 'vegetarian' } }, 1789030000)
 const mission = (overrides = {}) => ({ id: 'mission_test', revision: 1, state: 'queued', prompt: request().prompt, context: request().context, createdAt: 1789030000, updatedAt: 1789030000, destinations: [], needs: [], answer: null, ...overrides })
 beforeEach(() => vi.stubGlobal('navigator', { locks: locks(), onLine: true }))
 afterEach(() => vi.unstubAllGlobals())
@@ -40,7 +40,7 @@ describe('mission journal and exact authority', () => {
   it('bounds the prompt/context and strips privileged top-level fields', () => {
     expect(() => missionRequest('x'.repeat(4001))).toThrow('4,000')
     expect(() => missionRequest('Find dinner', { preferences: 'x'.repeat(17000) })).toThrow('context')
-    expect(missionRequest('Find dinner', { accessToken: 'secret', systemPrompt: 'ignore policy' })).toEqual({ prompt: 'Find dinner', context: {} })
+    expect(missionRequest('Find dinner', { accessToken: 'secret', systemPrompt: 'ignore policy' })).toMatchObject({ prompt: 'Find dinner', context: { requestedAt: expect.any(Number) } })
   })
   it('persists before dispatch and concurrent tabs share one exact create intent', async () => {
     const s = storage(); const input = { kind: 'create', path: '/missions', body: request() }
@@ -48,6 +48,20 @@ describe('mission journal and exact authority', () => {
     expect(a.key).toBe(b.key); expect(readJournal(s, 'accountA').pending).toHaveLength(1)
     await expect(queueIntent(s, 'accountA', { ...input, body: missionRequest('Book somewhere else') })).rejects.toThrow('earlier request')
     expect(readJournal(s, 'accountA').pending[0].body).toEqual(request())
+  })
+  it('freezes relative-date authority at submission across offline replay and repeated send', async () => {
+    const s = storage()
+    const first = missionRequest('Call for tonight', { timezone: 'Europe/Madrid', requestedAt: 1 }, 1789030000)
+    expect(first.context.requestedAt).toBe(1789030000)
+    const saved = await queueIntent(s, 'accountA', { kind: 'create', path: '/missions', body: first })
+    const later = missionRequest('Call for tonight', first.context, 1789116400)
+    expect(later.context.requestedAt).toBe(1789116400)
+    const replay = await queueIntent(s, 'accountA', { kind: 'create', path: '/missions', body: later })
+    expect(replay.key).toBe(saved.key); expect(replay.body).toEqual(first)
+    const anonymous = storage()
+    const staged = await stageSignInSubmission(anonymous, first)
+    expect(await stageSignInSubmission(anonymous, later)).toEqual(staged)
+    expect(readIdentity(anonymous).submission.request.context.requestedAt).toBe(1789030000)
   })
   it('marks uncertainty durably and atomically saves result/removes pending', async () => {
     const s = storage(); const p = await queueIntent(s, 'accountA', { kind: 'create', path: '/missions', body: request() })

@@ -6,6 +6,14 @@ export const MISSION_STATES = ['queued', 'dialing', 'speaking', 'waiting', 'need
 export const terminalMission = (m) => ['completed', 'failed', 'canceled'].includes(m.state)
 const object = (x) => x && typeof x === 'object' && !Array.isArray(x)
 const clone = (x) => JSON.parse(JSON.stringify(x))
+const sameRequest = (a, b, ignoreRequestedAt = false) => {
+  const stable = (value) => {
+    const copy = clone(value)
+    if (ignoreRequestedAt && object(copy.context)) delete copy.context.requestedAt
+    return JSON.stringify(copy)
+  }
+  return stable(a) === stable(b)
+}
 const empty = () => ({ v: 1, draft: '', context: {}, contextAt: 0, pending: [], missions: [], replies: {} })
 const identifier = (s) => typeof s === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(s)
 export const missionKey = (account) => {
@@ -62,7 +70,7 @@ export async function stageSignInSubmission(storage, request, expectedAccount = 
     const old = readIdentity(storage)
     if (old.accountId !== expectedAccount) throw new Error('The selected account changed before saving. Review the prompt in the account you want to use.')
     if (old.submission) {
-      if (JSON.stringify(old.submission.request) !== JSON.stringify(request)) throw new Error('The earlier submitted request is still saved. Finish signing in for it first.')
+      if (!sameRequest(old.submission.request, request, true)) throw new Error('The earlier submitted request is still saved. Finish signing in for it first.')
       return old.submission
     }
     const submission = { key: crypto.randomUUID(), request: clone(request), accountId: old.accountId }
@@ -88,15 +96,16 @@ export async function saveMissionDraft(storage, account, draft) {
 
 export function cleanContext(value = {}) {
   const out = {}
-  for (const name of ['timezone', 'locale', 'partySize', 'location', 'preferences', 'customer', 'restaurants', 'savedPlaces']) {
+  for (const name of ['timezone', 'locale', 'partySize', 'location', 'preferences', 'customer', 'restaurants', 'savedPlaces', 'requestedAt']) {
     if (value[name] !== undefined) out[name] = clone(value[name])
   }
   if (JSON.stringify(out).length > 16000) throw new Error('There is too much saved context for one request. Choose a city or a smaller set of places.')
   return out
 }
-export function missionRequest(prompt, context = {}) {
+export function missionRequest(prompt, context = {}, requestedAt = Math.floor(Date.now() / 1000)) {
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('Enter a request of up to 4,000 characters.')
-  return { prompt: prompt.trim(), context: cleanContext(context) }
+  if (!Number.isFinite(requestedAt) || requestedAt <= 0) throw new Error('The request time could not be saved.')
+  return { prompt: prompt.trim(), context: cleanContext({ ...context, requestedAt }) }
 }
 export async function queueIntent(storage, account, { path, body, kind, subject = 'new', key = crypto.randomUUID() }) {
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(key) || !['create', 'answer', 'cancel'].includes(kind)) throw new Error('Could not create a safe request.')
@@ -104,7 +113,7 @@ export async function queueIntent(storage, account, { path, body, kind, subject 
   return changeJournal(storage, account, (j) => {
     const existing = j.pending.find((p) => p.kind === kind && p.subject === subject && !p.rejected)
     if (existing) {
-      if (JSON.stringify(existing.body) !== JSON.stringify(copy)) throw new Error('An earlier request is still awaiting confirmation. It has been kept with its original instructions.')
+      if (!sameRequest(existing.body, copy, kind === 'create')) throw new Error('An earlier request is still awaiting confirmation. It has been kept with its original instructions.')
       return clone(existing)
     }
     const intent = { key, path, body: copy, kind, subject, attempted: false, createdAt: Date.now() }

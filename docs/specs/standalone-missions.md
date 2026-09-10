@@ -26,6 +26,9 @@ the offline journal; a different account cannot replay an earlier account's inte
 Known saved references use `context.savedPlaces:[{id?,name,city?,notes?,sourceUrls?}]`,
 matching the backend contract. Saved places alone do not establish current location
 or authorize a call. The backend resolves contacts and enforces prompt authority.
+`context.requestedAt` freezes Unix submission time in the exact request. Relative
+dates such as “tonight” must use that anchor and remain valid at execution time;
+reconnect never silently moves the requested day. New prompts get a fresh anchor.
 
 Before dispatch, atomically persist the exact request and key under a Web Lock.
 Keep ambiguous requests for same-key reconciliation. Answer/cancel intent is also
