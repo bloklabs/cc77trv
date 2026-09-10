@@ -92,6 +92,20 @@ test('one normal prompt reuses location/preferences, signs in with nonce, discov
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
+test('an expired visible Google challenge refreshes automatically without resubmitting the mission', async ({ page }) => {
+  await page.clock.install()
+  const api = await setup(page)
+  await send(page)
+  await expect(page.getByRole('button', { name: 'Google test account' })).toBeVisible()
+  expect(await page.evaluate(() => window.__gsi.nonce)).toBe('nonce-1')
+  await page.clock.fastForward(301000)
+  await expect.poll(() => page.evaluate(() => window.__gsi.nonce)).toBe('nonce-2')
+  expect(api.posts).toHaveLength(0)
+  await signIn(page)
+  await expect.poll(() => api.posts.length).toBe(1)
+  expect(api.exchanges[0].challengeId).toBe('challenge-2')
+})
+
 test('anonymous submission survives reload before sign-in without sending typed-but-unsubmitted drafts', async ({ page }) => {
   const api = await setup(page, { anonymous: true })
   await send(page, 'Call three vegetarian restaurants in San Sebastián in Spanish and report back.')

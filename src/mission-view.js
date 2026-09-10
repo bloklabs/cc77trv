@@ -100,7 +100,7 @@ export function mountMissions(root, controller) {
         const form = node.querySelector('[data-answer]')
         if (form) form.querySelector('button').disabled = pending.some((p) => !p.rejected && p.kind === 'answer' && p.subject === m.id + '/' + q.id)
       }
-      if (!authenticated && controller.authWanted && state.online && !controller.authFlight && (!controller.challenge || !googleHost.childElementCount)) void controller.signIn(googleHost)
+      if (!authenticated && controller.authWanted && state.online && !controller.authFlight && (!controller.challenge || controller.challenge.expiresAt <= Date.now() || !googleHost.childElementCount)) void controller.signIn(googleHost)
     } finally { painting = false }
   }
   const click = (event) => {
