@@ -2,9 +2,9 @@ name: CI & Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, release/concierge-readable-titles]
   pull_request:
-    branches: [main]
+    branches: [main, release/concierge-readable-titles]
   workflow_dispatch:
 
 concurrency:
@@ -38,15 +38,18 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run test:browser
+      - name: Verify exact publication ref
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/concierge-readable-titles'
+        run: test "$GITHUB_REF" = 'refs/heads/release/concierge-readable-titles'
       - name: Upload Pages artifact
-        if: github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/concierge-readable-titles'
         uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
   deploy:
     name: Deploy GitHub Pages
-    if: github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/release/concierge-readable-titles'
     needs: test
     runs-on: ubuntu-latest
     permissions:
