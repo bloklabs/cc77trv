@@ -97,8 +97,22 @@ distinct Tailnet-IP/port origin.
 
 ## Delivery
 
-`.github/workflows/deploy.yml` runs tests, lint, and the production build on
-every pull request and push to `main`. A green `main` deploys GitHub Pages.
+This isolated title-readability release line starts from the saved Pages
+release `b7d36525f06dcd9353bc796c417f509a419ddc97`. It keeps the held mission UI
+on `main` separate; the `main` branch and its workflow are unchanged.
+
+On this line, `.github/workflows/deploy.yml` tests pull requests and pushes
+targeting `main` or the single branch `release/concierge-readable-titles`.
+Pull requests never upload or deploy. Only a push or guarded dispatch of
+the exact release ref may publish, after audit, tests, lint, build and browser
+checks pass. The case-sensitive ref check rejects similarly named refs.
+
+Before merging or publishing, require independent approval and green CI for
+the exact feature head, and verify that the existing `github-pages`
+environment admits this exact release branch. This workflow does not grant
+environment admission. If the branch is excluded, hold publication; do not
+broaden the environment policy or publish the held `main` as a workaround.
+The Pages URL and all storage identities above remain unchanged.
 
 The voice design was agreed by Fable 5.1 and Astra before implementation.
 See the [original spec](docs/specs/restaurant-voice.md) and
